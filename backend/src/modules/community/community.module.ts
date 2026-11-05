@@ -352,6 +352,7 @@ export class CommunityController {
       ChatRoomEntity,
       ChatMessageEntity,
       BarberEntity,
+      UserEntity,
     ]),
   ],
   controllers: [CommunityController],
