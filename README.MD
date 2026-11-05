@@ -3,6 +3,7 @@ source video họp buổi 1:
 https://drive.google.com/file/d/1KffZU2MyW-bALKImpAmeam2YyRHvfegD/view?usp=sharing
 
 source video họp buổi 2:
+
 https://drive.google.com/file/d/19WIpdeZ-pyNcJ70VDfgxeCIoTtEsRzp4/view?usp=sharing
 
 source doc tiến độ, phân công công việc:
