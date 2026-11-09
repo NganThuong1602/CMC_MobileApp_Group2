@@ -21,12 +21,15 @@ import {
   ChatMessageEntity,
   ChatRoomEntity,
   DEFAULT_AVATAR_URL,
+  NotificationType,
   PostCommentEntity,
   PostEntity,
   ReviewEntity,
   ShopEntity,
   UserEntity,
 } from '../../database/entities';
+import { NotificationsService } from '../notifications/notifications.module';
+import { RealtimeGateway } from '../realtime/realtime.module';
 
 @Injectable()
 export class CommunityService {
@@ -47,6 +50,8 @@ export class CommunityService {
     private readonly barberRepo: Repository<BarberEntity>,
     @InjectRepository(UserEntity)
     private readonly userRepo: Repository<UserEntity>,
+    private readonly notificationsService: NotificationsService,
+    private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
   async getPublicUserProfile(userId: string) {
@@ -63,9 +68,9 @@ export class CommunityService {
       gender: user.gender,
       birthDate: user.birthDate,
       avatarUrl:
-          user.avatarUrl && user.avatarUrl.trim().length > 0
-            ? user.avatarUrl
-            : DEFAULT_AVATAR_URL,
+        user.avatarUrl && user.avatarUrl.trim().length > 0
+          ? user.avatarUrl
+          : DEFAULT_AVATAR_URL,
       coverUrl: user.coverUrl ?? '',
     };
   }
@@ -230,7 +235,7 @@ export class CommunityService {
         this.roomRepo.create({
           shopId,
           customerId,
-          lastMessage: 'Bắt đầu cuộc trò chuyện tư vấn kiểu tóc',
+          lastMessage: 'Bắt đầu cuộc trò chuyện với quán',
         }),
       );
       room = await this.roomRepo.findOneOrFail({
@@ -241,7 +246,33 @@ export class CommunityService {
     return room;
   }
 
+  /**
+   * Lấy danh sách phòng chat tư vấn khách hàng cho Chủ quán (Manager).
+   */
+  async getConsultRoomsForManager(managerUserId: string) {
+    const shop = await this.shopRepo.findOne({
+      where: { ownerId: managerUserId },
+    });
+    if (!shop) return [];
+    return this.roomRepo.find({
+      where: { shopId: shop.id },
+      relations: ['customer', 'shop'],
+      order: { updatedAt: 'DESC' },
+    });
+  }
+
   async getConsultRoomsForBarber(barberUserId: string) {
+    // Dự phòng nếu gọi API cũ từ phía Manager hoặc Barber
+    const ownedShop = await this.shopRepo.findOne({
+      where: { ownerId: barberUserId },
+    });
+    if (ownedShop) {
+      return this.roomRepo.find({
+        where: { shopId: ownedShop.id },
+        relations: ['customer', 'shop'],
+        order: { updatedAt: 'DESC' },
+      });
+    }
     const barber = await this.barberRepo.findOne({
       where: { userId: barberUserId },
     });
@@ -270,11 +301,87 @@ export class CommunityService {
       createdAt: m.createdAt,
     }));
   }
+
+  /**
+   * Gửi tin nhắn trong phòng chat giữa Khách hàng và Chủ quán (Manager):
+   * - Lưu tin nhắn vào DB.
+   * - Phát sự kiện realtime qua Socket.IO.
+   * - Tạo thông báo thật (NotificationEntity) gửi về cho Chủ quán (khi khách nhắn)
+   *   hoặc gửi về cho Khách hàng (khi Chủ quán phản hồi).
+   */
+  async sendRoomMessage(roomId: string, senderId: string, content: string) {
+    const cleanContent = content?.trim();
+    if (!cleanContent) {
+      throw new BadRequestException('Nội dung tin nhắn không được để trống');
+    }
+
+    const sender = await this.userRepo.findOne({ where: { id: senderId } });
+    if (!sender) {
+      throw new NotFoundException('Không tìm thấy tài khoản gửi tin nhắn');
+    }
+
+    const room = await this.roomRepo.findOne({
+      where: { id: roomId },
+      relations: ['shop', 'customer'],
+    });
+    if (!room) {
+      throw new NotFoundException('Không tìm thấy phòng trò chuyện');
+    }
+
+    const saved = await this.msgRepo.save(
+      this.msgRepo.create({
+        roomId,
+        senderId,
+        content: cleanContent,
+      }),
+    );
+
+    await this.roomRepo.update(roomId, {
+      lastMessage: cleanContent,
+    });
+
+    if (room.shop && sender.id !== room.shop.ownerId) {
+      await this.notificationsService.createAndPush({
+        recipientId: room.shop.ownerId,
+        title: `Tin nhắn mới từ khách hàng ${sender.fullName}`,
+        body: cleanContent,
+        type: NotificationType.CHAT_MESSAGE,
+        metadata: { roomId: room.id, shopId: room.shopId },
+      });
+    } else if (room.customerId && sender.id !== room.customerId) {
+      await this.notificationsService.createAndPush({
+        recipientId: room.customerId,
+        title: `Phản hồi từ quán ${room.shop?.name ?? 'BarberSmart'}`,
+        body: cleanContent,
+        type: NotificationType.CHAT_MESSAGE,
+        metadata: { roomId: room.id, shopId: room.shopId },
+      });
+    }
+
+    const payload = {
+      id: saved.id,
+      roomId: saved.roomId,
+      senderId: sender.id,
+      senderName: sender.fullName,
+      senderAvatar: sender.avatarUrl ?? '',
+      senderRole: sender.role,
+      content: saved.content,
+      createdAt: saved.createdAt,
+    };
+
+    this.realtimeGateway.emitChatRoomMessage(roomId, payload);
+    return payload;
+  }
 }
 
 @Controller()
 export class CommunityController {
   constructor(private readonly service: CommunityService) {}
+
+  @Get('users/:userId/public-profile')
+  getPublicUserProfile(@Param('userId') userId: string) {
+    return this.service.getPublicUserProfile(userId);
+  }
 
   @Get('posts')
   getAllFeedPosts() {
@@ -298,6 +405,25 @@ export class CommunityController {
     @Body() dto: { caption: string; imageUrls?: string[] },
   ) {
     return this.service.createPost(user.id, dto);
+  }
+
+  @Patch('posts/:postId')
+  @UseGuards(JwtAuthGuard)
+  updatePost(
+    @Param('postId') postId: string,
+    @CurrentUser() user: UserEntity,
+    @Body() dto: { caption?: string; imageUrls?: string[] },
+  ) {
+    return this.service.updatePost(postId, user.id, dto);
+  }
+
+  @Delete('posts/:postId')
+  @UseGuards(JwtAuthGuard)
+  deletePost(
+    @Param('postId') postId: string,
+    @CurrentUser() user: UserEntity,
+  ) {
+    return this.service.deletePost(postId, user.id);
   }
 
   @Post('posts/:postId/comments')
@@ -329,6 +455,12 @@ export class CommunityController {
     return this.service.openOrCreateShopGroupChat(shopId, user.id);
   }
 
+  @Get('chat/manager/rooms')
+  @UseGuards(JwtAuthGuard)
+  getManagerRooms(@CurrentUser() user: UserEntity) {
+    return this.service.getConsultRoomsForManager(user.id);
+  }
+
   @Get('chat/barber/rooms')
   @UseGuards(JwtAuthGuard)
   getBarberRooms(@CurrentUser() user: UserEntity) {
@@ -339,6 +471,16 @@ export class CommunityController {
   @UseGuards(JwtAuthGuard)
   getMessages(@Param('roomId') roomId: string) {
     return this.service.getRoomMessages(roomId);
+  }
+
+  @Post('chat/rooms/:roomId/messages')
+  @UseGuards(JwtAuthGuard)
+  sendMessage(
+    @Param('roomId') roomId: string,
+    @CurrentUser() user: UserEntity,
+    @Body() body: { content: string },
+  ) {
+    return this.service.sendRoomMessage(roomId, user.id, body.content);
   }
 }
 
@@ -359,4 +501,3 @@ export class CommunityController {
   providers: [CommunityService],
 })
 export class CommunityModule {}
-

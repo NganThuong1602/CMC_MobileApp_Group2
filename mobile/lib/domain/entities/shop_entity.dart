@@ -17,6 +17,10 @@ class ShopEntity extends Equatable {
   final int reviewCount;
   final double distanceKm;
   final DateTime? highlightExpiresAt;
+  final bool isActive;
+  final String ownerName;
+  final String ownerPhone;
+  final String ownerEmail;
 
   const ShopEntity({
     required this.id,
@@ -35,6 +39,10 @@ class ShopEntity extends Equatable {
     required this.reviewCount,
     this.distanceKm = 0.0,
     this.highlightExpiresAt,
+    this.isActive = true,
+    this.ownerName = '',
+    this.ownerPhone = '',
+    this.ownerEmail = '',
   });
 
   bool isHighlightedAt(DateTime now) {
@@ -58,6 +66,10 @@ class ShopEntity extends Equatable {
     int? reviewCount,
     double? distanceKm,
     DateTime? highlightExpiresAt,
+    bool? isActive,
+    String? ownerName,
+    String? ownerPhone,
+    String? ownerEmail,
   }) {
     return ShopEntity(
       id: id ?? this.id,
@@ -76,6 +88,10 @@ class ShopEntity extends Equatable {
       reviewCount: reviewCount ?? this.reviewCount,
       distanceKm: distanceKm ?? this.distanceKm,
       highlightExpiresAt: highlightExpiresAt ?? this.highlightExpiresAt,
+      isActive: isActive ?? this.isActive,
+      ownerName: ownerName ?? this.ownerName,
+      ownerPhone: ownerPhone ?? this.ownerPhone,
+      ownerEmail: ownerEmail ?? this.ownerEmail,
     );
   }
 
@@ -97,6 +113,9 @@ class ShopEntity extends Equatable {
         reviewCount,
         distanceKm,
         highlightExpiresAt,
+        isActive,
+        ownerName,
+        ownerPhone,
+        ownerEmail,
       ];
 }
-

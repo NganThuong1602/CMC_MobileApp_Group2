@@ -1,26 +1,62 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/enums/app_enums.dart';
 import '../../core/error/failures.dart';
 import '../../core/network/socket_service.dart';
+import '../../core/services/session_storage_service.dart';
+import '../../core/utils/formatters.dart';
 import '../../core/utils/result.dart';
 import '../../domain/entities/user_entity.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../datasources/local/in_memory_database.dart';
 import '../datasources/remote/remote_api_datasource.dart';
+import '../models/app_models.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
   final InMemoryDatabase db;
   final RemoteApiDataSource remote;
   final SocketService socketService;
+  final SessionStorageService sessionStorage;
 
-  const AuthRepositoryImpl({
+  AuthRepositoryImpl({
     required this.db,
     required this.remote,
     required this.socketService,
-  });
+    this.sessionStorage = const SessionStorageService(),
+  }) {
+    _restorePersistedSessionSync();
+  }
 
-  void _syncUserToLocalCache(UserEntity user) {
+  void _restorePersistedSessionSync() {
+    try {
+      final savedToken = sessionStorage.readToken();
+      final savedUserRaw = sessionStorage.readUserJson();
+      if (savedUserRaw != null && savedUserRaw.isNotEmpty) {
+        final decoded = jsonDecode(savedUserRaw);
+        if (decoded is Map) {
+          final restoredUser = UserModel.fromJson(
+            Map<String, dynamic>.from(decoded),
+          );
+          if (restoredUser.id.isNotEmpty) {
+            if (savedToken != null && savedToken.isNotEmpty) {
+              remote.apiClient.setAccessToken(savedToken);
+            }
+            final idx = db.users.indexWhere((u) => u.id == restoredUser.id);
+            if (idx == -1) {
+              db.users.add(restoredUser);
+            } else {
+              db.users[idx] = restoredUser;
+            }
+            db.currentUser = restoredUser;
+            socketService.connect(restoredUser.id);
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _syncUserToLocalCache(UserEntity user, {String? token}) {
     final idx = db.users.indexWhere((u) => u.id == user.id);
     if (idx == -1) {
       db.users.add(user);
@@ -28,6 +64,10 @@ class AuthRepositoryImpl implements AuthRepository {
       db.users[idx] = user;
     }
     db.currentUser = user;
+    sessionStorage.saveSession(
+      token: token ?? remote.apiClient.accessToken,
+      userJson: jsonEncode(UserModel.toJson(user)),
+    );
   }
 
   String _extractDioError(DioException e, String fallback) {
@@ -56,7 +96,7 @@ class AuthRepositoryImpl implements AuthRepository {
 
     try {
       final remoteRes = await remote.login(normalizedEmail, password);
-      _syncUserToLocalCache(remoteRes.user);
+      _syncUserToLocalCache(remoteRes.user, token: remoteRes.token);
       socketService.connect(remoteRes.user.id);
       return Result.success(remoteRes.user);
     } on DioException catch (e) {
@@ -79,7 +119,7 @@ class AuthRepositoryImpl implements AuthRepository {
     }
 
     final user = db.users[idx];
-    db.currentUser = user;
+    _syncUserToLocalCache(user);
     socketService.connect(user.id);
     return Result.success(user);
   }
@@ -108,6 +148,10 @@ class AuthRepositoryImpl implements AuthRepository {
       return Result.failure(
         const ValidationFailure('Địa chỉ Email không hợp lệ'),
       );
+    }
+    final phoneErr = AppFormatters.validateVietnamPhone(cleanPhone);
+    if (phoneErr != null) {
+      return Result.failure(ValidationFailure(phoneErr));
     }
     if (password.length < 6) {
       return Result.failure(
@@ -171,7 +215,7 @@ class AuthRepositoryImpl implements AuthRepository {
 
     try {
       final remoteRes = await remote.verifyRegisterOtp(cleanEmail, cleanOtp);
-      _syncUserToLocalCache(remoteRes.user);
+      _syncUserToLocalCache(remoteRes.user, token: remoteRes.token);
       socketService.connect(remoteRes.user.id);
       return Result.success(remoteRes.user);
     } on DioException catch (e) {
@@ -210,7 +254,7 @@ class AuthRepositoryImpl implements AuthRepository {
     db.users.add(created);
     db.passwordsByEmail[cleanEmail] = draft.password;
     db.registerDraftsByEmail.remove(cleanEmail);
-    db.currentUser = created;
+    _syncUserToLocalCache(created);
     socketService.connect(created.id);
     return Result.success(created);
   }
@@ -351,7 +395,7 @@ class AuthRepositoryImpl implements AuthRepository {
     );
     db.users[idx] = updated;
     if (db.currentUser?.id == userId) {
-      db.currentUser = updated;
+      _syncUserToLocalCache(updated);
     }
     return Result.success(updated);
   }
@@ -361,6 +405,7 @@ class AuthRepositoryImpl implements AuthRepository {
     // Dọn dẹp sạch Token/Session cục bộ & đóng WebSocket
     remote.clearToken();
     db.currentUser = null;
+    sessionStorage.clearSession();
     socketService.disconnect();
     return Result.success(null);
   }

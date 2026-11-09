@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/di/injection_container.dart';
+import '../../../core/enums/app_enums.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../domain/entities/barber_entity.dart';
@@ -12,11 +13,11 @@ import '../../../domain/repositories/shop_repository.dart';
 import '../../../domain/repositories/social_repository.dart';
 import '../../blocs/auth/auth_cubit.dart';
 
-/// Bottom Sheet Chi tiết quán chuẩn Pixel-perfect theo Ảnh 4:
+/// Bottom Sheet Chi tiết quán chuẩn Pixel-perfect:
 /// - Thanh kéo trên cùng (drag handle)
-/// - Ảnh vuông bo góc + Tên, Địa chỉ, Giờ mở cửa + Nút pill viền xanh `Chỉ đường`
-/// - Nút full-width xanh lá `Chat với barber` (tích hợp Socket.IO Group Chat)
-/// - 5 Tab: `Thông tin`, `Dịch vụ`, `Hình ảnh`, `Barber`, `Đánh giá`
+/// - Ảnh vuông bo góc + Tên, Địa chỉ, Giờ mở cửa + Nút pill viền `Chỉ đường`
+/// - Nút `Chat với barber` (tích hợp Socket.IO Group Chat) & `Đặt lịch`
+/// - 5 Tab: `Thông tin`, `Dịch vụ`, `Hình ảnh`, `Barber` (chạm vào Barber mở Trang cá nhân của Barber đó), `Đánh giá`
 class ShopDetailBottomSheet extends StatefulWidget {
   final ShopEntity shop;
   final VoidCallback? onDirectionsTap;
@@ -35,7 +36,7 @@ class ShopDetailBottomSheet extends StatefulWidget {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      backgroundColor: AppTheme.transparent,
       builder: (_) => ShopDetailBottomSheet(
         shop: shop,
         onDirectionsTap: onDirectionsTap,
@@ -106,10 +107,12 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
   }
 
   void _showWriteReviewDialog() {
+    final appColors = context.appColors;
     final user = context.read<AuthCubit>().state.user;
     if (user == null) return;
     int selectedStars = 5;
     final commentCtrl = TextEditingController();
+    String? commentError;
 
     showDialog<void>(
       context: context,
@@ -128,7 +131,7 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                       i < selectedStars
                           ? Icons.star_rounded
                           : Icons.star_border_rounded,
-                      color: const Color(0xFFFFB300),
+                      color: appColors.starRating,
                       size: 30,
                     ),
                   );
@@ -137,8 +140,14 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
               TextField(
                 controller: commentCtrl,
                 maxLines: 3,
-                decoration: const InputDecoration(
+                onChanged: (_) {
+                  if (commentError != null) {
+                    setModalState(() => commentError = null);
+                  }
+                },
+                decoration: InputDecoration(
                   hintText: 'Chia sẻ trải nghiệm cắt tóc của bạn...',
+                  errorText: commentError,
                 ),
               ),
             ],
@@ -150,11 +159,17 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
             ),
             ElevatedButton(
               onPressed: () async {
+                if (commentCtrl.text.trim().isEmpty) {
+                  setModalState(() {
+                    commentError = 'Vui lòng nhập nội dung đánh giá của bạn';
+                  });
+                  return;
+                }
                 await sl<SocialRepository>().addShopReview(
                   shopId: widget.shop.id,
                   userId: user.id,
                   rating: selectedStars,
-                  comment: commentCtrl.text,
+                  comment: commentCtrl.text.trim(),
                 );
                 if (ctx.mounted) Navigator.pop(ctx);
                 _loadDetails();
@@ -169,15 +184,18 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     return DraggableScrollableSheet(
       initialChildSize: 0.72,
       minChildSize: 0.5,
       maxChildSize: 0.93,
       builder: (context, scrollCtrl) {
         return Container(
-          decoration: const BoxDecoration(
-            color: AppTheme.surfaceWhite,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(
             children: [
@@ -186,7 +204,7 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                 width: 44,
                 height: 4.5,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFD6DCE5),
+                  color: cs.outline,
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
@@ -207,10 +225,10 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                             errorBuilder: (_, __, ___) => Container(
                               width: 76,
                               height: 76,
-                              color: AppTheme.primaryGreenLight,
-                              child: const Icon(
+                              color: cs.primaryContainer,
+                              child: Icon(
                                 Icons.storefront_rounded,
-                                color: AppTheme.primaryGreen,
+                                color: cs.primary,
                               ),
                             ),
                           ),
@@ -224,29 +242,19 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                                 widget.shop.name,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 16.5,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppTheme.textPrimary,
-                                ),
+                                style: tt.cardTitleLarge,
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 widget.shop.address,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 12.5,
-                                  color: AppTheme.textSecondary,
-                                ),
+                                style: tt.bodySmallMuted,
                               ),
                               const SizedBox(height: 3),
                               Text(
                                 '${widget.shop.openTime} - ${widget.shop.closeTime}',
-                                style: const TextStyle(
-                                  fontSize: 12.5,
-                                  color: AppTheme.textSecondary,
-                                ),
+                                style: tt.bodySmallMuted,
                               ),
                               const SizedBox(height: 6),
                               InkWell(
@@ -261,29 +269,24 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                                     vertical: 4,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: AppTheme.primaryGreenLight,
+                                    color: cs.primaryContainer,
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
-                                      color: AppTheme.primaryGreen
-                                          .withValues(alpha: 0.35),
+                                      color: cs.primary.withValues(alpha: 0.35),
                                     ),
                                   ),
-                                  child: const Row(
+                                  child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Icon(
                                         Icons.near_me_rounded,
                                         size: 13,
-                                        color: AppTheme.primaryGreen,
+                                        color: cs.primary,
                                       ),
-                                      SizedBox(width: 4),
+                                      const SizedBox(width: 4),
                                       Text(
                                         'Chỉ đường',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                          color: AppTheme.primaryGreen,
-                                        ),
+                                        style: tt.badgePrimary,
                                       ),
                                     ],
                                   ),
@@ -302,7 +305,7 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                           child: ElevatedButton.icon(
                             onPressed: _openGroupChat,
                             icon: const Icon(Icons.forum_rounded, size: 18),
-                            label: const Text('Chat với barber'),
+                            label: const Text('Chat với quán'),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -314,10 +317,7 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                               Icons.calendar_month_rounded,
                               size: 18,
                             ),
-                            label: const Text(
-                              'Đặt lịch',
-                              style: TextStyle(fontWeight: FontWeight.w700),
-                            ),
+                            label: const Text('Đặt lịch'),
                           ),
                         ),
                       ],
@@ -329,13 +329,6 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                 controller: _tabController,
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
-                labelColor: AppTheme.primaryGreen,
-                unselectedLabelColor: AppTheme.textSecondary,
-                indicatorColor: AppTheme.primaryGreen,
-                labelStyle: const TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                ),
                 tabs: const [
                   Tab(text: 'Thông tin'),
                   Tab(text: 'Dịch vụ'),
@@ -348,11 +341,11 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                 child: TabBarView(
                   controller: _tabController,
                   children: [
-                    _buildInfoTab(scrollCtrl),
-                    _buildServicesTab(scrollCtrl),
+                    _buildInfoTab(context, scrollCtrl),
+                    _buildServicesTab(context, scrollCtrl),
                     _buildGalleryTab(scrollCtrl),
-                    _buildBarbersTab(scrollCtrl),
-                    _buildReviewsTab(scrollCtrl),
+                    _buildBarbersTab(context, scrollCtrl),
+                    _buildReviewsTab(context, scrollCtrl),
                   ],
                 ),
               ),
@@ -363,7 +356,10 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
     );
   }
 
-  Widget _buildInfoTab(ScrollController ctrl) {
+  Widget _buildInfoTab(BuildContext context, ScrollController ctrl) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     return ListView(
       controller: ctrl,
       padding: const EdgeInsets.all(16),
@@ -371,38 +367,30 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: const Color(0xFFF3F6FB),
+            color: cs.surfaceContainer,
             borderRadius: BorderRadius.circular(14),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 children: [
                   Icon(
                     Icons.storefront_outlined,
                     size: 17,
-                    color: AppTheme.primaryGreen,
+                    color: cs.primary,
                   ),
-                  SizedBox(width: 6),
+                  const SizedBox(width: 6),
                   Text(
                     'Giới thiệu ngắn gọn:',
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.textPrimary,
-                    ),
+                    style: tt.bodyStrong,
                   ),
                 ],
               ),
               const SizedBox(height: 8),
               Text(
                 widget.shop.description,
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  height: 1.5,
-                  color: Color(0xFF555E68),
-                ),
+                style: tt.bodyRegular,
               ),
             ],
           ),
@@ -410,9 +398,9 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
         const SizedBox(height: 14),
         ListTile(
           contentPadding: EdgeInsets.zero,
-          leading: const Icon(
+          leading: Icon(
             Icons.phone_in_talk_rounded,
-            color: AppTheme.primaryGreen,
+            color: cs.primary,
           ),
           title: const Text('Hotline đặt lịch'),
           subtitle: Text(widget.shop.phone),
@@ -421,7 +409,10 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
     );
   }
 
-  Widget _buildServicesTab(ScrollController ctrl) {
+  Widget _buildServicesTab(BuildContext context, ScrollController ctrl) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     return ListView.separated(
       controller: ctrl,
       padding: const EdgeInsets.all(16),
@@ -432,7 +423,7 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
         return Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: AppTheme.scaffoldBg,
+            color: cs.surfaceContainerLow,
             borderRadius: BorderRadius.circular(14),
           ),
           child: Row(
@@ -443,29 +434,19 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                   children: [
                     Text(
                       s.name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
+                      style: tt.bodyStrong,
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Thời gian dự kiến: ${s.durationMinutes} phút',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppTheme.textSecondary,
-                      ),
+                      style: tt.bodySmallMuted,
                     ),
                   ],
                 ),
               ),
               Text(
                 AppFormatters.formatVnd(s.price),
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.primaryGreen,
-                  fontSize: 14.5,
-                ),
+                style: tt.pricePrimary,
               ),
             ],
           ),
@@ -494,7 +475,10 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
     );
   }
 
-  Widget _buildBarbersTab(ScrollController ctrl) {
+  Widget _buildBarbersTab(BuildContext context, ScrollController ctrl) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     return ListView.separated(
       controller: ctrl,
       padding: const EdgeInsets.all(16),
@@ -505,44 +489,83 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
         return Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppTheme.scaffoldBg,
+            color: cs.surfaceContainerLow,
             borderRadius: BorderRadius.circular(14),
           ),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 24,
-                backgroundColor: AppTheme.primaryGreenLight,
-                backgroundImage:
-                    b.avatarUrl != null ? NetworkImage(b.avatarUrl!) : null,
-                child: b.avatarUrl == null
-                    ? const Icon(Icons.person, color: AppTheme.primaryGreen)
-                    : null,
-              ),
-              const SizedBox(width: 12),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      b.fullName,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14.5,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    context.push('/profile-social?userId=${b.userId}');
+                  },
+                  child: Row(
+                    children: [
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          CircleAvatar(
+                            radius: 24,
+                            backgroundColor: cs.primaryContainer,
+                            backgroundImage: b.avatarUrl != null
+                                ? NetworkImage(b.avatarUrl!)
+                                : null,
+                            child: b.avatarUrl == null
+                                ? Icon(Icons.person, color: cs.primary)
+                                : null,
+                          ),
+                          Positioned(
+                            right: -2,
+                            bottom: -2,
+                            child: Container(
+                              width: 18,
+                              height: 18,
+                              decoration: BoxDecoration(
+                                color: cs.primary,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: cs.surface,
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: Icon(
+                                UserRole.barber.roleIcon,
+                                size: 10,
+                                color: cs.onPrimary,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    Text(
-                      b.bio,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              b.fullName,
+                              style: tt.cardTitle,
+                            ),
+                            Text(
+                              b.bio,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: tt.bodySmallMuted,
+                            ),
+                            Text(
+                              'Xem trang cá nhân →',
+                              style: tt.badgePrimary,
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
+              const SizedBox(width: 8),
               ElevatedButton(
                 onPressed: () => _openBooking(barberId: b.id),
                 style: ElevatedButton.styleFrom(
@@ -551,7 +574,7 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                     vertical: 8,
                   ),
                 ),
-                child: const Text('Chọn thợ', style: TextStyle(fontSize: 12.5)),
+                child: Text('Chọn thợ', style: tt.bodySmallOnPrimary),
               ),
             ],
           ),
@@ -560,7 +583,11 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
     );
   }
 
-  Widget _buildReviewsTab(ScrollController ctrl) {
+  Widget _buildReviewsTab(BuildContext context, ScrollController ctrl) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
     return ListView(
       controller: ctrl,
       padding: const EdgeInsets.all(16),
@@ -576,7 +603,7 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppTheme.scaffoldBg,
+              color: cs.surfaceContainerLow,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
@@ -586,16 +613,16 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                   children: [
                     Text(
                       r.userName,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+                      style: tt.bodyStrong,
                     ),
                     const Spacer(),
                     Row(
                       children: List.generate(
                         r.rating,
-                        (_) => const Icon(
+                        (_) => Icon(
                           Icons.star_rounded,
                           size: 15,
-                          color: Color(0xFFFFB300),
+                          color: appColors.starRating,
                         ),
                       ),
                     ),
@@ -604,7 +631,7 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                 const SizedBox(height: 6),
                 Text(
                   r.comment,
-                  style: const TextStyle(fontSize: 13),
+                  style: tt.bodyRegular,
                 ),
               ],
             ),
@@ -614,4 +641,3 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
     );
   }
 }
-

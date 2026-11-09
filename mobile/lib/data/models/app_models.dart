@@ -51,6 +51,32 @@ class UserModel extends UserEntity {
       gender: parsedGender,
     );
   }
+
+  static Map<String, dynamic> toJson(UserEntity user) {
+    final roleStr = switch (user.role) {
+      UserRole.manager => 'MANAGER',
+      UserRole.barber => 'BARBER',
+      UserRole.admin => 'ADMIN',
+      UserRole.user => 'USER',
+    };
+    final genderStr = switch (user.gender) {
+      Gender.male => 'MALE',
+      Gender.female => 'FEMALE',
+      Gender.other => 'OTHER',
+      null => null,
+    };
+    return {
+      'id': user.id,
+      'email': user.email,
+      'phone': user.phone,
+      'fullName': user.fullName,
+      'role': roleStr,
+      'avatarUrl': user.avatarUrl,
+      'coverUrl': user.coverUrl,
+      'birthDate': user.birthDate?.toIso8601String(),
+      'gender': genderStr,
+    };
+  }
 }
 
 class ShopModel extends ShopEntity {
@@ -71,6 +97,10 @@ class ShopModel extends ShopEntity {
     required super.reviewCount,
     super.distanceKm,
     super.highlightExpiresAt,
+    super.isActive,
+    super.ownerName,
+    super.ownerPhone,
+    super.ownerEmail,
   });
 
   factory ShopModel.fromJson(Map<String, dynamic> json) {
@@ -81,9 +111,12 @@ class ShopModel extends ShopEntity {
     final cover =
         (json['coverUrl'] ?? json['coverImageUrl'] ?? json['avatarUrl'] ?? '')
             .toString();
+    final ownerMap = json['owner'] is Map
+        ? Map<String, dynamic>.from(json['owner'] as Map)
+        : null;
     return ShopModel(
       id: (json['id'] ?? '').toString(),
-      ownerId: (json['ownerId'] ?? '').toString(),
+      ownerId: (json['ownerId'] ?? ownerMap?['id'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
       address: (json['address'] ?? '').toString(),
       phone: (json['phone'] ?? '').toString(),
@@ -104,6 +137,13 @@ class ShopModel extends ShopEntity {
       highlightExpiresAt: json['highlightExpiresAt'] != null
           ? DateTime.tryParse(json['highlightExpiresAt'].toString())
           : null,
+      isActive: json['isActive'] as bool? ?? true,
+      ownerName:
+          (json['ownerName'] ?? ownerMap?['fullName'] ?? '').toString(),
+      ownerPhone:
+          (json['ownerPhone'] ?? ownerMap?['phone'] ?? '').toString(),
+      ownerEmail:
+          (json['ownerEmail'] ?? ownerMap?['email'] ?? '').toString(),
     );
   }
 }
@@ -254,7 +294,9 @@ class BookingModel extends BookingEntity {
         : PaymentMethod.atShop;
 
     final rawServices =
-        (json['servicesSnapshot'] as List?) ?? (json['services'] as List?) ?? const [];
+        (json['servicesSnapshot'] as List?) ??
+        (json['services'] as List?) ??
+        const [];
     final services = rawServices
         .whereType<Map>()
         .map((m) => ServiceModel.fromJson(Map<String, dynamic>.from(m)))
@@ -283,7 +325,8 @@ class BookingModel extends BookingEntity {
               'Khách hàng')
           .toString(),
       customerPhone:
-          (json['customerPhone'] ?? json['customer']?['phone'] ?? '').toString(),
+          (json['customerPhone'] ?? json['customer']?['phone'] ?? '')
+              .toString(),
       services: services,
       date: DateTime.tryParse(
             (json['bookingDate'] ?? json['date'] ?? '').toString(),
@@ -299,7 +342,8 @@ class BookingModel extends BookingEntity {
       isPaid: json['isPaid'] as bool? ?? false,
       paymentCode: json['paymentCode']?.toString(),
       createdAt:
-          DateTime.tryParse((json['createdAt'] ?? '').toString()) ?? DateTime.now(),
+          DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
+          DateTime.now(),
     );
   }
 }
@@ -330,7 +374,8 @@ class PostCommentModel extends PostCommentEntity {
       postId: (json['postId'] ?? fallbackPostId).toString(),
       authorId: (json['authorId'] ?? author?['id'] ?? '').toString(),
       authorName:
-          (json['authorName'] ?? author?['fullName'] ?? 'Thành viên').toString(),
+          (json['authorName'] ?? author?['fullName'] ?? 'Thành viên')
+              .toString(),
       authorRole: UserRole.fromApi(
         (json['authorRole'] ?? author?['role'])?.toString(),
       ),
@@ -339,7 +384,8 @@ class PostCommentModel extends PostCommentEntity {
           : AppConstants.defaultAvatarUrl,
       content: (json['content'] ?? '').toString(),
       createdAt:
-          DateTime.tryParse((json['createdAt'] ?? '').toString()) ?? DateTime.now(),
+          DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
+          DateTime.now(),
     );
   }
 }
@@ -383,7 +429,8 @@ class PostModel extends PostEntity {
       id: postId,
       authorId: (json['authorId'] ?? author?['id'] ?? '').toString(),
       authorName:
-          (json['authorName'] ?? author?['fullName'] ?? 'Người dùng').toString(),
+          (json['authorName'] ?? author?['fullName'] ?? 'Người dùng')
+              .toString(),
       authorRole: UserRole.fromApi(
         (json['authorRole'] ?? author?['role'])?.toString(),
       ),
@@ -394,7 +441,8 @@ class PostModel extends PostEntity {
       imageUrls: imgs,
       comments: cmts,
       createdAt:
-          DateTime.tryParse((json['createdAt'] ?? '').toString()) ?? DateTime.now(),
+          DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
+          DateTime.now(),
     );
   }
 }
@@ -440,7 +488,8 @@ class ReviewModel extends ReviewEntity {
       rating: (json['rating'] as num?)?.toInt() ?? 5,
       comment: (json['comment'] ?? '').toString(),
       createdAt:
-          DateTime.tryParse((json['createdAt'] ?? '').toString()) ?? DateTime.now(),
+          DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
+          DateTime.now(),
     );
   }
 }
@@ -455,20 +504,33 @@ class AppNotificationModel extends AppNotificationEntity {
     super.isRead,
     super.targetShopId,
     super.targetBarberId,
+    super.targetRoomId,
+    super.payload,
     required super.createdAt,
   });
 
   factory AppNotificationModel.fromJson(Map<String, dynamic> json) {
     final rawType = (json['type'] ?? '').toString().toUpperCase();
-    NotificationType type = NotificationType.bookingCreated;
-    if (rawType.contains('INVITE')) {
-      type = NotificationType.barberInvitation;
-    } else if (rawType.contains('PAYMENT')) {
-      type = NotificationType.paymentConfirmed;
-    }
     final meta = json['metadata'] is Map
         ? Map<String, dynamic>.from(json['metadata'] as Map)
         : null;
+
+    NotificationType type = NotificationType.system;
+    if (rawType.contains('INVITE')) {
+      final responded = meta?['responded'] == true;
+      type = responded
+          ? NotificationType.system
+          : NotificationType.barberInvitation;
+    } else if (rawType.contains('PAYMENT')) {
+      type = NotificationType.paymentConfirmed;
+    } else if (rawType.contains('BOOKING')) {
+      type = NotificationType.bookingCreated;
+    } else if (rawType.contains('CHAT')) {
+      type = NotificationType.chatMessage;
+    } else if (rawType.contains('APPROVAL')) {
+      type = NotificationType.shopApproval;
+    }
+
     return AppNotificationModel(
       id: (json['id'] ?? '').toString(),
       userId: (json['recipientId'] ?? json['userId'] ?? '').toString(),
@@ -478,8 +540,11 @@ class AppNotificationModel extends AppNotificationEntity {
       isRead: json['isRead'] as bool? ?? false,
       targetShopId: meta?['shopId']?.toString(),
       targetBarberId: meta?['barberId']?.toString(),
+      targetRoomId: meta?['roomId']?.toString(),
+      payload: meta,
       createdAt:
-          DateTime.tryParse((json['createdAt'] ?? '').toString()) ?? DateTime.now(),
+          DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
+          DateTime.now(),
     );
   }
 }

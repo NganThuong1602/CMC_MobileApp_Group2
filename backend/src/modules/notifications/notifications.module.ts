@@ -6,6 +6,7 @@ import {
   Injectable,
   Logger,
   Module,
+  Param,
   Patch,
   Post,
   UseGuards,
@@ -117,6 +118,14 @@ export class NotificationsService {
     );
     return { success: true };
   }
+
+  async markOneRead(userId: string, notifId: string) {
+    await this.notiRepo.update(
+      { id: notifId, recipientId: userId },
+      { isRead: true },
+    );
+    return { success: true };
+  }
 }
 
 @Controller('notifications')
@@ -132,6 +141,14 @@ export class NotificationsController {
   @Patch('read-all')
   markAllRead(@CurrentUser() user: { id: string }) {
     return this.service.markAllRead(user.id);
+  }
+
+  @Patch(':id/read')
+  markOneRead(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+  ) {
+    return this.service.markOneRead(user.id, id);
   }
 
   @Post('fcm-token')
@@ -151,4 +168,3 @@ export class NotificationsController {
   exports: [NotificationsService],
 })
 export class NotificationsModule {}
-

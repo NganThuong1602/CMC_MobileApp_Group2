@@ -111,10 +111,15 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => CreatePostUseCase(sl<SocialRepository>()));
 
   // Presentation BLoCs / Cubits
+  // Khởi tạo AuthRepository trước để khôi phục Session đã lưu (nếu có) trước khi tạo AuthCubit & GoRouter
+  final authRepo = sl<AuthRepository>();
   sl.registerLazySingleton<AuthCubit>(
-    () => AuthCubit(authRepository: sl<AuthRepository>()),
+    () => AuthCubit(
+      authRepository: authRepo,
+      initialUser: sl<InMemoryDatabase>().currentUser,
+    ),
   );
-  sl.registerFactory<ShopDiscoveryCubit>(
+  sl.registerLazySingleton<ShopDiscoveryCubit>(
     () => ShopDiscoveryCubit(
       shopRepository: sl<ShopRepository>(),
       socialRepository: sl<SocialRepository>(),

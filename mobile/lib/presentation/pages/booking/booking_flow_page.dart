@@ -50,6 +50,9 @@ class _BookingFlowView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
     final user = context.watch<AuthCubit>().state.user;
 
     return BlocConsumer<BookingBloc, BookingState>(
@@ -58,7 +61,7 @@ class _BookingFlowView extends StatelessWidget {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(state.errorMessage!),
-              backgroundColor: AppTheme.dangerRed,
+              backgroundColor: cs.error,
             ),
           );
         }
@@ -74,8 +77,7 @@ class _BookingFlowView extends StatelessWidget {
             if (!context.mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                backgroundColor:
-                    paid ? AppTheme.primaryGreen : Colors.orange.shade800,
+                backgroundColor: paid ? cs.primary : appColors.warning,
                 content: Text(
                   paid
                       ? 'SePay đã xác nhận! Lịch cắt đã tự động chuyển sang Hoàn thành.'
@@ -86,9 +88,11 @@ class _BookingFlowView extends StatelessWidget {
             context.go('/my-bookings');
           } else {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                backgroundColor: AppTheme.primaryGreen,
-                content: Text('Đặt lịch thành công! Hẹn gặp bạn tại quán.'),
+              SnackBar(
+                backgroundColor: cs.primary,
+                content: const Text(
+                  'Đặt lịch thành công! Hẹn gặp bạn tại quán.',
+                ),
               ),
             );
             context.go('/my-bookings');
@@ -111,37 +115,41 @@ class _BookingFlowView extends StatelessWidget {
             ),
             title: Text(
               state.shop?.name ?? 'Đặt lịch cắt tóc',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              style: tt.dialogTitle,
             ),
           ),
           body: state.isLoading && state.shop == null
               ? const Center(
-                  child: CircularProgressIndicator(color: AppTheme.primaryGreen),
+                  child: CircularProgressIndicator(),
                 )
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
-                    _buildSectionTitle('1. Chọn Barber phục vụ'),
+                    _buildSectionTitle(context, '1. Chọn Barber phục vụ'),
                     const SizedBox(height: 10),
                     _buildBarberSelector(context, state),
                     const SizedBox(height: 20),
                     _buildSectionTitle(
+                      context,
                       '2. Chọn Dịch vụ (Tự động cộng thời lượng)',
                     ),
                     const SizedBox(height: 10),
                     _buildServiceMultiSelector(context, state),
                     const SizedBox(height: 14),
-                    _buildDurationSummaryBanner(state),
+                    _buildDurationSummaryBanner(context, state),
                     const SizedBox(height: 20),
-                    _buildSectionTitle('3. Chọn Ngày & Khung giờ còn trống'),
+                    _buildSectionTitle(
+                      context,
+                      '3. Chọn Ngày & Khung giờ còn trống',
+                    ),
                     const SizedBox(height: 10),
                     _buildHorizontalDateStrip(context, state),
                     const SizedBox(height: 14),
-                    _buildSlotLegend(),
+                    _buildSlotLegend(context),
                     const SizedBox(height: 12),
                     _buildTwoRowContinuousTimeline(context, state),
                     const SizedBox(height: 20),
-                    _buildSectionTitle('4. Phương thức thanh toán'),
+                    _buildSectionTitle(context, '4. Phương thức thanh toán'),
                     const SizedBox(height: 10),
                     _buildPaymentSelector(context, state),
                     const SizedBox(height: 90),
@@ -149,9 +157,9 @@ class _BookingFlowView extends StatelessWidget {
                 ),
           bottomNavigationBar: Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            decoration: const BoxDecoration(
-              color: AppTheme.surfaceWhite,
-              border: Border(top: BorderSide(color: Color(0xFFEEEEEE))),
+            decoration: BoxDecoration(
+              color: cs.surface,
+              border: Border(top: BorderSide(color: cs.outlineVariant)),
             ),
             child: SafeArea(
               top: false,
@@ -164,18 +172,11 @@ class _BookingFlowView extends StatelessWidget {
                       children: [
                         Text(
                           'Tổng cộng (${state.totalDurationMinutes} phút)',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.textSecondary,
-                          ),
+                          style: tt.bodySmallMuted,
                         ),
                         Text(
                           AppFormatters.formatVnd(state.totalPrice),
-                          style: const TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.w900,
-                            color: AppTheme.primaryGreen,
-                          ),
+                          style: tt.priceLargePrimary,
                         ),
                       ],
                     ),
@@ -206,22 +207,21 @@ class _BookingFlowView extends StatelessWidget {
     );
   }
 
-  Widget _buildSectionTitle(String title) {
+  Widget _buildSectionTitle(BuildContext context, String title) {
     return Text(
       title,
-      style: const TextStyle(
-        fontSize: 15,
-        fontWeight: FontWeight.w800,
-        color: AppTheme.textPrimary,
-      ),
+      style: context.appTextStyles.sectionTitle,
     );
   }
 
   Widget _buildBarberSelector(BuildContext context, BookingState state) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     if (state.barbers.isEmpty) {
-      return const Text(
+      return Text(
         'Quán hiện chưa có Barber nào.',
-        style: TextStyle(color: AppTheme.textSecondary),
+        style: tt.bodyMuted,
       );
     }
     return SizedBox(
@@ -240,14 +240,10 @@ class _BookingFlowView extends StatelessWidget {
               width: 145,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: selected
-                    ? AppTheme.primaryGreenLight
-                    : AppTheme.surfaceWhite,
+                color: selected ? cs.primaryContainer : cs.surface,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: selected
-                      ? AppTheme.primaryGreen
-                      : const Color(0xFFE5EAF0),
+                  color: selected ? cs.primary : cs.outline,
                   width: selected ? 1.8 : 1,
                 ),
               ),
@@ -256,12 +252,12 @@ class _BookingFlowView extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 20,
-                    backgroundColor: AppTheme.primaryGreen,
+                    backgroundColor: cs.primary,
                     backgroundImage: barber.avatarUrl != null
                         ? NetworkImage(barber.avatarUrl!)
                         : null,
                     child: barber.avatarUrl == null
-                        ? const Icon(Icons.person, color: Colors.white, size: 20)
+                        ? Icon(Icons.person, color: cs.onPrimary, size: 20)
                         : null,
                   ),
                   const SizedBox(height: 6),
@@ -269,17 +265,11 @@ class _BookingFlowView extends StatelessWidget {
                     barber.fullName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: tt.bodySmallStrong,
                   ),
                   Text(
                     '⭐ ${barber.rating.toStringAsFixed(1)}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary,
-                    ),
+                    style: tt.captionMuted,
                   ),
                 ],
               ),
@@ -291,6 +281,9 @@ class _BookingFlowView extends StatelessWidget {
   }
 
   Widget _buildServiceMultiSelector(BuildContext context, BookingState state) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     return Column(
       children: state.services.map((service) {
         final checked =
@@ -298,31 +291,24 @@ class _BookingFlowView extends StatelessWidget {
         return Container(
           margin: const EdgeInsets.only(bottom: 8),
           decoration: BoxDecoration(
-            color: AppTheme.surfaceWhite,
+            color: cs.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color:
-                  checked ? AppTheme.primaryGreen : const Color(0xFFE8ECF2),
+              color: checked ? cs.primary : cs.outline,
             ),
           ),
           child: CheckboxListTile(
             value: checked,
-            activeColor: AppTheme.primaryGreen,
+            activeColor: cs.primary,
             onChanged: (_) =>
                 context.read<BookingBloc>().add(BookingServiceToggled(service)),
             title: Text(
               service.name,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-              ),
+              style: tt.bodyStrong,
             ),
             subtitle: Text(
               '${service.durationMinutes} phút • ${AppFormatters.formatVnd(service.price)}',
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: AppTheme.textSecondary,
-              ),
+              style: tt.bodySmallMuted,
             ),
           ),
         );
@@ -330,29 +316,28 @@ class _BookingFlowView extends StatelessWidget {
     );
   }
 
-  Widget _buildDurationSummaryBanner(BookingState state) {
+  Widget _buildDurationSummaryBanner(BuildContext context, BookingState state) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: AppTheme.primaryGreenLight,
+        color: cs.primaryContainer,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.timer_outlined,
-            color: AppTheme.primaryGreen,
+            color: cs.primary,
             size: 20,
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               'Đã chọn ${state.selectedServices.length} dịch vụ • Tổng thời lượng: ${state.totalDurationMinutes} phút',
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.primaryGreen,
-              ),
+              style: tt.bodySmallPrimary,
             ),
           ),
         ],
@@ -361,6 +346,8 @@ class _BookingFlowView extends StatelessWidget {
   }
 
   Widget _buildHorizontalDateStrip(BuildContext context, BookingState state) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final dates = List.generate(7, (i) => today.add(Duration(days: i)));
@@ -382,12 +369,10 @@ class _BookingFlowView extends StatelessWidget {
             child: Container(
               width: 64,
               decoration: BoxDecoration(
-                color: selected ? AppTheme.primaryGreen : AppTheme.surfaceWhite,
+                color: selected ? cs.primary : cs.surface,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: selected
-                      ? AppTheme.primaryGreen
-                      : const Color(0xFFE5EAF0),
+                  color: selected ? cs.primary : cs.outline,
                 ),
               ),
               child: Column(
@@ -395,21 +380,12 @@ class _BookingFlowView extends StatelessWidget {
                 children: [
                   Text(
                     i == 0 ? 'H.Nay' : AppFormatters.weekdayShortVi(d),
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color:
-                          selected ? Colors.white70 : AppTheme.textSecondary,
-                    ),
+                    style: selected ? tt.captionOnPrimary : tt.captionMuted,
                   ),
                   const SizedBox(height: 3),
                   Text(
                     '${d.day}/${d.month}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: selected ? Colors.white : AppTheme.textPrimary,
-                    ),
+                    style: selected ? tt.bodySmallOnPrimary : tt.bodyStrong,
                   ),
                 ],
               ),
@@ -420,20 +396,26 @@ class _BookingFlowView extends StatelessWidget {
     );
   }
 
-  Widget _buildSlotLegend() {
+  Widget _buildSlotLegend(BuildContext context) {
+    final cs = context.colorScheme;
     return Wrap(
       spacing: 14,
       runSpacing: 6,
       children: [
-        _legendDot(Colors.white, 'Còn trống', border: AppTheme.primaryGreen),
-        _legendDot(AppTheme.primaryGreen, 'Đang chọn'),
-        _legendDot(const Color(0xFFDADFE6), 'Đã có người đặt'),
-        _legendDot(const Color(0xFFF3E5E5), 'Khóa do tràn giờ'),
+        _legendDot(context, cs.surface, 'Còn trống', border: cs.primary),
+        _legendDot(context, cs.primary, 'Đang chọn'),
+        _legendDot(context, cs.surfaceContainerHighest, 'Đã có người đặt'),
+        _legendDot(context, cs.errorContainer, 'Khóa do tràn giờ'),
       ],
     );
   }
 
-  Widget _legendDot(Color bg, String text, {Color? border}) {
+  Widget _legendDot(
+    BuildContext context,
+    Color bg,
+    String text, {
+    Color? border,
+  }) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -443,13 +425,13 @@ class _BookingFlowView extends StatelessWidget {
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: border ?? Colors.transparent),
+            border: Border.all(color: border ?? AppTheme.transparent),
           ),
         ),
         const SizedBox(width: 5),
         Text(
           text,
-          style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+          style: context.appTextStyles.captionMuted,
         ),
       ],
     );
@@ -459,7 +441,11 @@ class _BookingFlowView extends StatelessWidget {
     BuildContext context,
     BookingState state,
   ) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
     final schedule = state.daySchedule;
+
     if (schedule == null) {
       return const SizedBox.shrink();
     }
@@ -469,50 +455,38 @@ class _BookingFlowView extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceWhite,
+        color: cs.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: AppTheme.softCardShadow,
+        boxShadow: appColors.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'Ca sáng ($openStr - 11:30)',
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary,
-            ),
+            style: tt.bodyStrong,
           ),
           const SizedBox(height: 8),
           _buildContinuousShiftRow(context, state, schedule.morningSlots),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(
               children: [
-                Expanded(child: Divider()),
+                const Expanded(child: Divider()),
                 Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Text(
                     'Nghỉ trưa cố định: 11:30 - 14:00',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textSecondary,
-                    ),
+                    style: tt.captionMuted,
                   ),
                 ),
-                Expanded(child: Divider()),
+                const Expanded(child: Divider()),
               ],
             ),
           ),
           Text(
             'Ca chiều (14:00 - $closeStr)',
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary,
-            ),
+            style: tt.bodyStrong,
           ),
           const SizedBox(height: 8),
           _buildContinuousShiftRow(context, state, schedule.afternoonSlots),
@@ -521,16 +495,12 @@ class _BookingFlowView extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: AppTheme.primaryGreenLight,
+                color: cs.primaryContainer,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
                 'Khung giờ phục vụ dự kiến: ${state.selectedSlot!.allocatedRangeLabel} (${state.totalDurationMinutes} phút)',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.primaryGreen,
-                ),
+                style: tt.bodySmallPrimary,
               ),
             ),
           ],
@@ -544,6 +514,9 @@ class _BookingFlowView extends StatelessWidget {
     BookingState state,
     List<TimeSlotEntity> slots,
   ) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     return SizedBox(
       height: 54,
       child: ListView.separated(
@@ -555,24 +528,30 @@ class _BookingFlowView extends StatelessWidget {
           final isSelected =
               state.selectedSlot?.startMinutes == slot.startMinutes;
 
-          Color bgColor = Colors.white;
-          Color textColor = AppTheme.textPrimary;
-          Color borderColor = AppTheme.primaryGreen.withValues(alpha: 0.55);
+          Color bgColor = cs.surface;
+          Color borderColor = cs.primary.withValues(alpha: 0.55);
+          TextStyle timeStyle = tt.bodySmallStrong;
+          TextStyle statusStyle = tt.badgePrimary;
+          Color iconColor = cs.primary;
 
           if (isSelected) {
-            bgColor = AppTheme.primaryGreen;
-            textColor = Colors.white;
-            borderColor = AppTheme.primaryGreen;
+            bgColor = cs.primary;
+            borderColor = cs.primary;
+            timeStyle = tt.bodySmallOnPrimary;
+            statusStyle = tt.captionOnPrimary;
+            iconColor = cs.onPrimary;
           } else if (slot.isBooked) {
-            // Đã có người đặt -> màu xám
-            bgColor = const Color(0xFFE0E4EA);
-            textColor = const Color(0xFF8C96A4);
-            borderColor = const Color(0xFFD0D6DF);
+            bgColor = cs.surfaceContainerHighest;
+            borderColor = cs.outline;
+            timeStyle = tt.bodySmallMuted;
+            statusStyle = tt.captionMuted;
+            iconColor = cs.onSurfaceVariant;
           } else if (slot.hasDurationConflict) {
-            // Bị tràn qua 11:30 / giờ đóng cửa hoặc cấn lịch sau -> Disable khóa
-            bgColor = const Color(0xFFF9ECEC);
-            textColor = const Color(0xFFB57B7B);
-            borderColor = const Color(0xFFEBD2D2);
+            bgColor = cs.errorContainer;
+            borderColor = cs.error.withValues(alpha: 0.35);
+            timeStyle = tt.bodySmallDanger;
+            statusStyle = tt.badgeDanger;
+            iconColor = cs.error;
           }
 
           return GestureDetector(
@@ -602,29 +581,20 @@ class _BookingFlowView extends StatelessWidget {
                 children: [
                   Text(
                     slot.timeLabel,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: textColor,
-                    ),
+                    style: timeStyle,
                   ),
                   const SizedBox(height: 2),
                   if (slot.isBooked)
                     Text(
                       'Đã đặt',
-                      style: TextStyle(fontSize: 9.5, color: textColor),
+                      style: statusStyle,
                     )
                   else if (slot.hasDurationConflict)
-                    Icon(Icons.lock_outline_rounded, size: 12, color: textColor)
+                    Icon(Icons.lock_outline_rounded, size: 12, color: iconColor)
                   else
                     Text(
                       'Trống',
-                      style: TextStyle(
-                        fontSize: 9.5,
-                        color: isSelected
-                            ? Colors.white70
-                            : AppTheme.primaryGreen,
-                      ),
+                      style: statusStyle,
                     ),
                 ],
               ),
@@ -636,17 +606,19 @@ class _BookingFlowView extends StatelessWidget {
   }
 
   Widget _buildPaymentSelector(BuildContext context, BookingState state) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     return Column(
       children: PaymentMethod.values.map((m) {
         final selected = state.paymentMethod == m;
         return Container(
           margin: const EdgeInsets.only(bottom: 8),
           decoration: BoxDecoration(
-            color: AppTheme.surfaceWhite,
+            color: cs.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color:
-                  selected ? AppTheme.primaryGreen : const Color(0xFFE5EAF0),
+              color: selected ? cs.primary : cs.outline,
             ),
           ),
           child: ListTile(
@@ -657,24 +629,17 @@ class _BookingFlowView extends StatelessWidget {
               selected
                   ? Icons.radio_button_checked_rounded
                   : Icons.radio_button_off_rounded,
-              color:
-                  selected ? AppTheme.primaryGreen : AppTheme.textSecondary,
+              color: selected ? cs.primary : cs.onSurfaceVariant,
             ),
             title: Text(
               m.label,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-              ),
+              style: tt.bodyStrong,
             ),
             subtitle: Text(
               m == PaymentMethod.qrCode
                   ? 'Tạo mã VietQR động, SePay tự động xác nhận Hoàn thành qua Socket.IO'
                   : 'Thanh toán trực tiếp cho Barber sau khi cắt xong',
-              style: const TextStyle(
-                fontSize: 12,
-                color: AppTheme.textSecondary,
-              ),
+              style: tt.bodySmallMuted,
             ),
           ),
         );
@@ -682,4 +647,3 @@ class _BookingFlowView extends StatelessWidget {
     );
   }
 }
-

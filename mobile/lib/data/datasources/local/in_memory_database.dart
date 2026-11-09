@@ -88,9 +88,7 @@ class InMemoryDatabase {
     required String transferContent,
   }) {
     final encodedInfo = Uri.encodeComponent(transferContent);
-    final encodedAccountName =
-        Uri.encodeComponent(AppConstants.platformBankOwner);
-    return 'https://img.vietqr.io/image/${AppConstants.sepayBankCode}-${AppConstants.platformBankAccount}-compact2.png?amount=$amount&addInfo=$encodedInfo&accountName=$encodedAccountName';
+    return 'https://qr.sepay.vn/img?bank=${AppConstants.sepayBankCode}&acc=${AppConstants.platformBankAccount}&template=compact&amount=$amount&des=$encodedInfo';
   }
 
   double calculateDistanceKm(
@@ -117,7 +115,22 @@ class InMemoryDatabase {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
-    // 1. Seed Users cho đủ 3 Role + tài khoản rảnh để test mời Barber
+    // 1. Seed Users cho đủ 4 Role (User, Manager, Barber, Admin) + tài khoản rảnh để test mời Barber
+    const adminUser = UserEntity(
+      id: 'u_admin_1',
+      email: 'admin@barbersmart.vn',
+      phone: '0900999999',
+      fullName: 'Quản Trị Viên Hệ Thống',
+      role: UserRole.admin,
+      avatarUrl:
+          'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=300&q=80',
+      coverUrl:
+          'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=900&q=80',
+      gender: Gender.male,
+    );
+    users.add(adminUser.copyWith(birthDate: DateTime(1990, 1, 1)));
+    passwordsByEmail['admin@barbersmart.vn'] = '123456';
+
     const customerUser = UserEntity(
       id: 'u_customer_1',
       email: 'user@barbersmart.vn',

@@ -2,6 +2,7 @@ export enum UserRole {
   USER = 'USER',
   MANAGER = 'MANAGER',
   BARBER = 'BARBER',
+  ADMIN = 'ADMIN',
 }
 
 export enum Gender {
@@ -49,6 +50,8 @@ export enum NotificationType {
   BOOKING = 'BOOKING',
   BARBER_INVITE = 'BARBER_INVITE',
   PAYMENT_SUCCESS = 'PAYMENT_SUCCESS',
+  CHAT_MESSAGE = 'CHAT_MESSAGE',
+  SHOP_APPROVAL = 'SHOP_APPROVAL',
   SYSTEM = 'SYSTEM',
 }
 
@@ -64,5 +67,3 @@ export const DEFAULT_AVATAR_URL =
  */
 export const DEFAULT_LOCATION_LAT = 20.9768;
 export const DEFAULT_LOCATION_LNG = 105.7724;
-
-

@@ -74,5 +74,13 @@ abstract class ShopRepository {
   });
 
   Future<Result<ShopRevenueSummary>> getShopRevenueAndPayroll(String shopId);
+
+  Future<Result<List<ShopEntity>>> getAdminPendingShops();
+
+  Future<Result<List<ShopEntity>>> getAdminActiveShops();
+
+  Future<Result<ShopEntity>> approveShopByAdmin(String shopId);
+
+  Future<Result<void>> deleteShopByAdmin(String shopId);
 }
 

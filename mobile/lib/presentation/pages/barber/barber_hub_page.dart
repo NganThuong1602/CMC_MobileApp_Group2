@@ -9,19 +9,17 @@ import '../../../domain/entities/barber_entity.dart';
 import '../../../domain/entities/booking_entity.dart';
 import '../../../domain/entities/finance_entities.dart';
 import '../../../domain/entities/shop_entity.dart';
-import '../../../domain/entities/social_entities.dart';
 import '../../../domain/repositories/barber_repository.dart';
 import '../../../domain/repositories/booking_repository.dart';
 import '../../../domain/repositories/shop_repository.dart';
-import '../../../domain/repositories/social_repository.dart';
 import '../../blocs/auth/auth_cubit.dart';
 import '../../blocs/shop_discovery/shop_discovery_cubit.dart';
 import '../../widgets/barbersmart_header.dart';
 
-/// Màn hình Trung tâm Lịch Barber (Role BARBER) chuẩn Pixel-perfect theo Ảnh 10:
-/// - Card quán kèm ảnh bìa lớn có huy hiệu trắng góc trái trên `● ĐANG HOẠT ĐỘNG`.
-/// - Tên quán đậm + Giờ mở cửa + SĐT xanh lá bên dưới.
-/// - 3 Card menu trắng:
+/// Màn hình Trung tâm Lịch Barber (Role BARBER) chuẩn Pixel-perfect:
+/// - Card quán kèm ảnh bìa lớn có huy hiệu góc trái trên `● ĐANG HOẠT ĐỘNG`.
+/// - Tên quán đậm + Giờ mở cửa + SĐT bên dưới.
+/// - 3 Card menu:
 ///   1. `Xem Lịch` (Heatmap theo tháng + Timeline ngày + Nút "Xác nhận đã thanh toán" đổi sang COMPLETED)
 ///   2. `Tư vấn khách hàng` (Group Chat Socket.IO với khách hàng)
 ///   3. `Thu nhập` (Lương cứng + 10% hoa hồng từ đơn COMPLETED + Ngày nhận lương dự kiến)
@@ -63,7 +61,11 @@ class _BarberHubPageState extends State<BarberHubPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
     final user = context.watch<AuthCubit>().state.user;
+
     return BlocBuilder<ShopDiscoveryCubit, ShopDiscoveryState>(
       builder: (context, discoveryState) {
         return Column(
@@ -83,23 +85,23 @@ class _BarberHubPageState extends State<BarberHubPage> {
             Expanded(
               child: _loading
                   ? const Center(
-                      child: CircularProgressIndicator(
-                        color: AppTheme.primaryGreen,
-                      ),
+                      child: CircularProgressIndicator(),
                     )
                   : (_barber == null || _shop == null)
-                      ? const Center(
-                          child: Text('Bạn chưa thuộc quán cắt tóc nào.'),
+                      ? Center(
+                          child: Text(
+                            'Bạn chưa thuộc quán cắt tóc nào.',
+                            style: tt.bodyMuted,
+                          ),
                         )
                       : ListView(
                           padding: const EdgeInsets.all(16),
                           children: [
-                            // Card Quán của Barber chuẩn Ảnh 10 (có badge ĐANG HOẠT ĐỘNG)
                             Container(
                               decoration: BoxDecoration(
-                                color: AppTheme.surfaceWhite,
+                                color: cs.surface,
                                 borderRadius: BorderRadius.circular(18),
-                                boxShadow: AppTheme.softCardShadow,
+                                boxShadow: appColors.cardShadow,
                               ),
                               clipBehavior: Clip.antiAlias,
                               child: Column(
@@ -114,7 +116,7 @@ class _BarberHubPageState extends State<BarberHubPage> {
                                           fit: BoxFit.cover,
                                           errorBuilder: (_, __, ___) =>
                                               Container(
-                                            color: const Color(0xFF1F2937),
+                                            color: cs.inverseSurface,
                                           ),
                                         ),
                                       ),
@@ -127,27 +129,22 @@ class _BarberHubPageState extends State<BarberHubPage> {
                                             vertical: 5,
                                           ),
                                           decoration: BoxDecoration(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.96),
+                                            color: appColors.translucentSurface,
                                             borderRadius:
                                                 BorderRadius.circular(20),
                                           ),
-                                          child: const Row(
+                                          child: Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
                                               Icon(
                                                 Icons.circle,
                                                 size: 8,
-                                                color: AppTheme.primaryGreen,
+                                                color: cs.primary,
                                               ),
-                                              SizedBox(width: 5),
+                                              const SizedBox(width: 5),
                                               Text(
                                                 'ĐANG HOẠT ĐỘNG',
-                                                style: TextStyle(
-                                                  fontSize: 10.5,
-                                                  fontWeight: FontWeight.w800,
-                                                  color: AppTheme.primaryGreen,
-                                                ),
+                                                style: tt.badgePrimary,
                                               ),
                                             ],
                                           ),
@@ -163,47 +160,35 @@ class _BarberHubPageState extends State<BarberHubPage> {
                                       children: [
                                         Text(
                                           _shop!.name,
-                                          style: const TextStyle(
-                                            fontSize: 17.5,
-                                            fontWeight: FontWeight.w800,
-                                            color: AppTheme.textPrimary,
-                                          ),
+                                          style: tt.cardTitleLarge,
                                         ),
                                         const SizedBox(height: 8),
                                         Row(
                                           children: [
-                                            const Icon(
+                                            Icon(
                                               Icons.access_time_filled_rounded,
                                               size: 16,
-                                              color: AppTheme.primaryGreen,
+                                              color: cs.primary,
                                             ),
                                             const SizedBox(width: 6),
                                             Text(
                                               '${_shop!.openTime} - ${_shop!.closeTime}',
-                                              style: const TextStyle(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w600,
-                                                color: AppTheme.textPrimary,
-                                              ),
+                                              style: tt.bodyPrimary,
                                             ),
                                           ],
                                         ),
                                         const SizedBox(height: 5),
                                         Row(
                                           children: [
-                                            const Icon(
+                                            Icon(
                                               Icons.phone_in_talk_rounded,
                                               size: 16,
-                                              color: AppTheme.primaryGreen,
+                                              color: cs.primary,
                                             ),
                                             const SizedBox(width: 6),
                                             Text(
                                               _shop!.phone,
-                                              style: const TextStyle(
-                                                fontSize: 13.5,
-                                                fontWeight: FontWeight.w700,
-                                                color: AppTheme.primaryGreen,
-                                              ),
+                                              style: tt.bodySmallPrimary,
                                             ),
                                           ],
                                         ),
@@ -215,9 +200,10 @@ class _BarberHubPageState extends State<BarberHubPage> {
                             ),
                             const SizedBox(height: 16),
                             _buildBarberMenuCard(
+                              context: context,
                               icon: Icons.calendar_month_rounded,
-                              iconBg: AppTheme.primaryGreenLight,
-                              iconColor: AppTheme.primaryGreen,
+                              iconBg: cs.primaryContainer,
+                              iconColor: cs.primary,
                               title: 'Xem Lịch',
                               onTap: () {
                                 Navigator.of(context).push(
@@ -231,25 +217,10 @@ class _BarberHubPageState extends State<BarberHubPage> {
                             ),
                             const SizedBox(height: 12),
                             _buildBarberMenuCard(
-                              icon: Icons.support_agent_rounded,
-                              iconBg: const Color(0xFFEDE9FE),
-                              iconColor: const Color(0xFF6D28D9),
-                              title: 'Tư vấn khách hàng',
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => _BarberChatListScreen(
-                                      shop: _shop!,
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                            const SizedBox(height: 12),
-                            _buildBarberMenuCard(
+                              context: context,
                               icon: Icons.account_balance_wallet_rounded,
-                              iconBg: const Color(0xFFFFEDD5),
-                              iconColor: const Color(0xFFC2410C),
+                              iconBg: appColors.warningContainer,
+                              iconColor: appColors.warning,
                               title: 'Thu nhập',
                               onTap: () {
                                 Navigator.of(context).push(
@@ -271,14 +242,19 @@ class _BarberHubPageState extends State<BarberHubPage> {
   }
 
   Widget _buildBarberMenuCard({
+    required BuildContext context,
     required IconData icon,
     required Color iconBg,
     required Color iconColor,
     required String title,
     required VoidCallback onTap,
   }) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
     return Material(
-      color: AppTheme.surfaceWhite,
+      color: cs.surface,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -287,7 +263,7 @@ class _BarberHubPageState extends State<BarberHubPage> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            boxShadow: AppTheme.softCardShadow,
+            boxShadow: appColors.cardShadow,
           ),
           child: Row(
             children: [
@@ -304,16 +280,12 @@ class _BarberHubPageState extends State<BarberHubPage> {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
-                  ),
+                  style: tt.cardTitle,
                 ),
               ),
-              const Icon(
+              Icon(
                 Icons.chevron_right_rounded,
-                color: AppTheme.textSecondary,
+                color: cs.onSurfaceVariant,
               ),
             ],
           ),
@@ -361,10 +333,13 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
   }
 
   void _showCustomerBookingDetail(BookingEntity booking) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
     final user = context.read<AuthCubit>().state.user;
+
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: AppTheme.surfaceWhite,
+      backgroundColor: cs.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -376,7 +351,7 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
           children: [
             Text(
               'Khách hàng: ${booking.customerName}',
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              style: tt.dialogTitle,
             ),
             const SizedBox(height: 6),
             Text('SĐT: ${booking.customerPhone}'),
@@ -387,10 +362,7 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
             const SizedBox(height: 6),
             Text(
               'Tổng tiền: ${AppFormatters.formatVnd(booking.totalPrice)} (${booking.status.label})',
-              style: const TextStyle(
-                fontWeight: FontWeight.w800,
-                color: AppTheme.primaryGreen,
-              ),
+              style: tt.pricePrimary,
             ),
             const SizedBox(height: 16),
             if (booking.status != BookingStatus.completed && user != null)
@@ -408,13 +380,16 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
                     res.fold(
                       onFailure: (f) =>
                           ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(f.message)),
+                        SnackBar(
+                          content: Text(f.message),
+                          backgroundColor: cs.error,
+                        ),
                       ),
                       onSuccess: (_) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            backgroundColor: AppTheme.primaryGreen,
-                            content: Text(
+                          SnackBar(
+                            backgroundColor: cs.primary,
+                            content: const Text(
                               'Đã xác nhận thanh toán! Đơn chuyển sang COMPLETED & cộng 10% hoa hồng.',
                             ),
                           ),
@@ -432,15 +407,12 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryGreenLight,
+                  color: cs.primaryContainer,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Text(
+                child: Text(
                   '✅ Đơn đã Hoàn thành & được ghi nhận doanh thu + 10% hoa hồng.',
-                  style: TextStyle(
-                    color: AppTheme.primaryGreen,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: tt.bodySmallPrimary,
                 ),
               ),
           ],
@@ -451,6 +423,10 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -463,16 +439,16 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: AppTheme.surfaceWhite,
+              color: cs.surface,
               borderRadius: BorderRadius.circular(16),
-              boxShadow: AppTheme.softCardShadow,
+              boxShadow: appColors.cardShadow,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Heatmap lịch khách đặt trong tháng',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                  style: tt.sectionTitle,
                 ),
                 const SizedBox(height: 10),
                 GridView.builder(
@@ -496,10 +472,10 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
                       child: Container(
                         decoration: BoxDecoration(
                           color: isSelected
-                              ? AppTheme.primaryGreen
+                              ? cs.primary
                               : hasCustomer
-                                  ? AppTheme.primaryGreenLight
-                                  : AppTheme.scaffoldBg,
+                                  ? cs.primaryContainer
+                                  : cs.surfaceContainerLow,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         alignment: Alignment.center,
@@ -508,24 +484,16 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
                           children: [
                             Text(
                               '${h.date.day}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: isSelected
-                                    ? Colors.white
-                                    : AppTheme.textPrimary,
-                              ),
+                              style: isSelected
+                                  ? tt.captionOnPrimary
+                                  : tt.captionStrong,
                             ),
                             if (hasCustomer)
                               Text(
                                 '${h.totalBookings}k',
-                                style: TextStyle(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w800,
-                                  color: isSelected
-                                      ? Colors.white
-                                      : AppTheme.primaryGreen,
-                                ),
+                                style: isSelected
+                                    ? tt.badgeOnPrimary
+                                    : tt.badgePrimary,
                               ),
                           ],
                         ),
@@ -539,16 +507,16 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
           const SizedBox(height: 18),
           Text(
             'Danh sách khách ngày ${AppFormatters.formatDateDdMmYyyy(_selectedDate)} (${_dayBookings.length})',
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+            style: tt.sectionTitle,
           ),
           const SizedBox(height: 10),
           if (_dayBookings.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
               child: Center(
                 child: Text(
                   'Không có lịch hẹn nào trong ngày này.',
-                  style: TextStyle(color: AppTheme.textSecondary),
+                  style: tt.bodyMuted,
                 ),
               ),
             )
@@ -557,111 +525,38 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
               (b) => Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 decoration: BoxDecoration(
-                  color: AppTheme.surfaceWhite,
+                  color: cs.surface,
                   borderRadius: BorderRadius.circular(14),
-                  boxShadow: AppTheme.softCardShadow,
+                  boxShadow: appColors.cardShadow,
                 ),
                 child: ListTile(
                   onTap: () => _showCustomerBookingDetail(b),
                   leading: CircleAvatar(
                     backgroundColor: b.status == BookingStatus.completed
-                        ? AppTheme.primaryGreenLight
-                        : const Color(0xFFFFF4E5),
+                        ? cs.primaryContainer
+                        : appColors.warningContainer,
                     child: Icon(
                       b.status == BookingStatus.completed
                           ? Icons.check_rounded
                           : Icons.schedule_rounded,
                       color: b.status == BookingStatus.completed
-                          ? AppTheme.primaryGreen
-                          : const Color(0xFFD97706),
+                          ? cs.primary
+                          : appColors.warning,
                     ),
                   ),
                   title: Text(
                     '${b.timeRangeLabel} • ${b.customerName}',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    style: tt.bodyStrong,
                   ),
                   subtitle: Text(
-                    '${AppFormatters.formatVnd(b.totalPrice)} • ${b.status.label} (Chạm để xác nhận TT)',
-                    style: const TextStyle(fontSize: 12.5),
+                    '${AppFormatters.formatVnd(b.totalPrice)} • ${b.status.label}',
+                    style: tt.bodySmallMuted,
                   ),
                 ),
               ),
             ),
         ],
       ),
-    );
-  }
-}
-
-class _BarberChatListScreen extends StatefulWidget {
-  final ShopEntity shop;
-  const _BarberChatListScreen({required this.shop});
-
-  @override
-  State<_BarberChatListScreen> createState() => _BarberChatListScreenState();
-}
-
-class _BarberChatListScreenState extends State<_BarberChatListScreen> {
-  List<ChatRoomEntity> _rooms = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final res =
-        await sl<SocialRepository>().getBarberShopChatRooms(widget.shop.id);
-    if (mounted) {
-      setState(() => _rooms = res.data ?? []);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Tư vấn khách hàng (Group Chat)')),
-      body: _rooms.isEmpty
-          ? const Center(child: Text('Chưa có cuộc hội thoại tư vấn nào.'))
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: _rooms.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (ctx, i) {
-                final room = _rooms[i];
-                final lastMsg = room.messages.isNotEmpty
-                    ? room.messages.last.content
-                    : 'Chưa có tin nhắn';
-                return Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceWhite,
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: AppTheme.softCardShadow,
-                  ),
-                  child: ListTile(
-                    onTap: () => context.push('/chat/${room.id}'),
-                    leading: const CircleAvatar(
-                      backgroundColor: AppTheme.primaryGreenLight,
-                      child: Icon(
-                        Icons.forum_outlined,
-                        color: AppTheme.primaryGreen,
-                      ),
-                    ),
-                    title: Text(
-                      'Khách hàng: ${room.customerName}',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    subtitle: Text(
-                      lastMsg,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                  ),
-                );
-              },
-            ),
     );
   }
 }
@@ -693,11 +588,14 @@ class _BarberIncomeScreenState extends State<_BarberIncomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Thu nhập của tôi')),
       body: _income == null
           ? const Center(
-              child: CircularProgressIndicator(color: AppTheme.primaryGreen),
+              child: CircularProgressIndicator(),
             )
           : ListView(
               padding: const EdgeInsets.all(16),
@@ -705,51 +603,47 @@ class _BarberIncomeScreenState extends State<_BarberIncomeScreen> {
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryGreen,
+                    color: cs.primary,
                     borderRadius: BorderRadius.circular(18),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Tổng thu nhập tạm tính trong tháng',
-                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                        style: tt.bodySmallOnPrimary,
                       ),
                       const SizedBox(height: 6),
                       Text(
                         AppFormatters.formatVnd(_income!.totalIncome),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                        ),
+                        style: tt.heroPriceOnPrimary,
                       ),
                       const SizedBox(height: 8),
                       Text(
                         _income!.expectedPaydayText,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: tt.bodySmallOnPrimary,
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 16),
                 _metricTile(
+                  context,
                   'Lương cứng cố định',
                   AppFormatters.formatVnd(_income!.baseSalary),
                 ),
                 _metricTile(
+                  context,
                   'Số khách đã Hoàn thành (COMPLETED)',
                   '${_income!.completedCustomerCount} khách',
                 ),
                 _metricTile(
+                  context,
                   'Doanh thu dịch vụ đã hoàn thành',
                   AppFormatters.formatVnd(_income!.completedServiceRevenue),
                 ),
                 _metricTile(
+                  context,
                   'Hoa hồng nhận được (10%)',
                   AppFormatters.formatVnd(_income!.commissionAmount),
                   highlight: true,
@@ -759,37 +653,38 @@ class _BarberIncomeScreenState extends State<_BarberIncomeScreen> {
     );
   }
 
-  Widget _metricTile(String label, String value, {bool highlight = false}) {
+  Widget _metricTile(
+    BuildContext context,
+    String label,
+    String value, {
+    bool highlight = false,
+  }) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceWhite,
+        color: cs.surface,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: AppTheme.softCardShadow,
+        boxShadow: appColors.cardShadow,
       ),
       child: Row(
         children: [
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(
-                fontSize: 13.5,
-                color: AppTheme.textSecondary,
-              ),
+              style: tt.bodyMuted,
             ),
           ),
           Text(
             value,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              color: highlight ? AppTheme.primaryGreen : AppTheme.textPrimary,
-            ),
+            style: highlight ? tt.pricePrimary : tt.cardTitle,
           ),
         ],
       ),
     );
   }
 }
-

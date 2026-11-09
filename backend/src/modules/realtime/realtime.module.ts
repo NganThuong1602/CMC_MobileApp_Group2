@@ -14,8 +14,10 @@ import { Repository } from 'typeorm';
 import {
   ChatMessageEntity,
   ChatRoomEntity,
+  NotificationType,
   UserEntity,
 } from '../../database/entities';
+import { NotificationsService } from '../notifications/notifications.module';
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -37,13 +39,16 @@ export class RealtimeGateway
     private readonly msgRepo: Repository<ChatMessageEntity>,
     @InjectRepository(UserEntity)
     private readonly userRepo: Repository<UserEntity>,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   handleConnection(client: Socket) {
     const userId = client.handshake.query.userId as string | undefined;
     if (userId) {
       client.join(`user:${userId}`);
-      this.logger.log(`Socket connected: ${client.id} -> joined user:${userId}`);
+      this.logger.log(
+        `Socket connected: ${client.id} -> joined user:${userId}`,
+      );
     }
   }
 
@@ -51,16 +56,16 @@ export class RealtimeGateway
     this.logger.log(`Socket disconnected: ${client.id}`);
   }
 
-  /**
-   * Đẩy sự kiện thanh toán SePay thành công ngay lập tức về thiết bị của User
-   * (Không cần chờ duyệt tay hay reload trang).
-   */
   emitPaymentSuccess(userId: string, payload: Record<string, any>) {
     this.server.to(`user:${userId}`).emit('payment.success', payload);
   }
 
   emitUserRoleUpdated(userId: string, payload: Record<string, any>) {
     this.server.to(`user:${userId}`).emit('user.role_updated', payload);
+  }
+
+  emitChatRoomMessage(roomId: string, payload: Record<string, any>) {
+    this.server.to(`chat:${roomId}`).emit('chat.new_message', payload);
   }
 
   @SubscribeMessage('chat.join_room')
@@ -82,20 +87,48 @@ export class RealtimeGateway
     },
   ) {
     if (!data.content?.trim()) return;
-    const sender = await this.userRepo.findOne({ where: { id: data.senderId } });
+    const sender = await this.userRepo.findOne({
+      where: { id: data.senderId },
+    });
     if (!sender) return;
 
+    const room = await this.roomRepo.findOne({
+      where: { id: data.roomId },
+      relations: ['shop', 'customer'],
+    });
+    if (!room) return;
+
+    const cleanContent = data.content.trim();
     const saved = await this.msgRepo.save(
       this.msgRepo.create({
         roomId: data.roomId,
         senderId: data.senderId,
-        content: data.content.trim(),
+        content: cleanContent,
       }),
     );
 
     await this.roomRepo.update(data.roomId, {
-      lastMessage: data.content.trim(),
+      lastMessage: cleanContent,
     });
+
+    // Gửi thông báo thật cho Quản lý quán (khi khách nhắn) hoặc cho Khách hàng (khi quản lý trả lời)
+    if (room.shop && sender.id !== room.shop.ownerId) {
+      await this.notificationsService.createAndPush({
+        recipientId: room.shop.ownerId,
+        title: `Tin nhắn mới từ khách hàng ${sender.fullName}`,
+        body: cleanContent,
+        type: NotificationType.CHAT_MESSAGE,
+        metadata: { roomId: room.id, shopId: room.shopId },
+      });
+    } else if (room.customerId && sender.id !== room.customerId) {
+      await this.notificationsService.createAndPush({
+        recipientId: room.customerId,
+        title: `Phản hồi từ quán ${room.shop?.name ?? 'BarberSmart'}`,
+        body: cleanContent,
+        type: NotificationType.CHAT_MESSAGE,
+        metadata: { roomId: room.id, shopId: room.shopId },
+      });
+    }
 
     const payload = {
       id: saved.id,
@@ -122,4 +155,3 @@ export class RealtimeGateway
   exports: [RealtimeGateway],
 })
 export class RealtimeModule {}
-

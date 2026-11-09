@@ -15,7 +15,7 @@ import '../shop/shop_detail_bottom_sheet.dart';
 /// Màn hình Bản đồ chuẩn Pixel-perfect theo Ảnh 5:
 /// - Dùng `flutter_map` kết hợp dữ liệu OpenStreetMap (OSM) (KHÔNG dùng Google Maps).
 /// - Lấy tọa độ GPS thật từ thiết bị qua `geolocator` và đặt tâm bản đồ tại đúng vị trí hiện tại của user.
-/// - Các Marker màu xanh lá `#00A859` hình Cái kéo + nhãn trắng hiển thị Tên quán & Khoảng cách thực tế (`km`).
+/// - Các Marker hình Cái kéo + nhãn hiển thị Tên quán & Khoảng cách thực tế (`km`).
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
 
@@ -27,6 +27,19 @@ class _MapPageState extends State<MapPage> {
   final MapController _mapController = MapController();
   final TextEditingController _mapSearchCtrl = TextEditingController();
   bool _isMapReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final cubit = context.read<ShopDiscoveryCubit>();
+      if (!cubit.state.hasRealDeviceGps) {
+        final userId = context.read<AuthCubit>().state.user?.id;
+        cubit.requestRealDeviceLocation(userId: userId);
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -59,7 +72,10 @@ class _MapPageState extends State<MapPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final appColors = context.appColors;
     final user = context.watch<AuthCubit>().state.user;
+
     return BlocConsumer<ShopDiscoveryCubit, ShopDiscoveryState>(
       listenWhen: (prev, curr) =>
           prev.filterResetRevision != curr.filterResetRevision ||
@@ -116,38 +132,7 @@ class _MapPageState extends State<MapPage> {
                       ),
                       MarkerLayer(
                         markers: [
-                          // Marker vị trí GPS hiện tại của người dùng
-                          Marker(
-                            point: center,
-                            width: 44,
-                            height: 44,
-                            child: Tooltip(
-                              message: state.hasRealDeviceGps
-                                  ? 'Vị trí GPS của bạn (${state.userLat.toStringAsFixed(4)}, ${state.userLng.toStringAsFixed(4)})'
-                                  : 'Tâm mặc định Vạn Phúc, Hà Đông',
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color:
-                                      Colors.blueAccent.withValues(alpha: 0.24),
-                                  shape: BoxShape.circle,
-                                ),
-                                alignment: Alignment.center,
-                                child: Container(
-                                  width: 16,
-                                  height: 16,
-                                  decoration: BoxDecoration(
-                                    color: Colors.blueAccent,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: Colors.white,
-                                      width: 2.5,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          // Marker các quán cắt tóc kèm khoảng cách thực tế (km)
+                          _buildUserLocationMarker(context, state),
                           ...state.nearbyShops.map(
                             (shop) => _buildShopMarker(context, shop),
                           ),
@@ -155,7 +140,6 @@ class _MapPageState extends State<MapPage> {
                       ),
                     ],
                   ),
-                  // Thanh tìm kiếm + Nút Lọc nổi đè lên Map ở trên cùng
                   Positioned(
                     top: 12,
                     left: 14,
@@ -169,9 +153,9 @@ class _MapPageState extends State<MapPage> {
                               child: Container(
                                 height: 46,
                                 decoration: BoxDecoration(
-                                  color: AppTheme.surfaceWhite,
+                                  color: cs.surface,
                                   borderRadius: BorderRadius.circular(12),
-                                  boxShadow: AppTheme.softCardShadow,
+                                  boxShadow: appColors.cardShadow,
                                 ),
                                 child: TextField(
                                   controller: _mapSearchCtrl,
@@ -185,13 +169,13 @@ class _MapPageState extends State<MapPage> {
                                       .read<ShopDiscoveryCubit>()
                                       .updateSearch(q),
                                   decoration: InputDecoration(
-                                    fillColor: Colors.transparent,
+                                    fillColor: AppTheme.transparent,
                                     border: InputBorder.none,
                                     enabledBorder: InputBorder.none,
                                     focusedBorder: InputBorder.none,
-                                    prefixIcon: const Icon(
+                                    prefixIcon: Icon(
                                       Icons.search_rounded,
-                                      color: AppTheme.primaryGreen,
+                                      color: cs.primary,
                                       size: 20,
                                     ),
                                     suffixIcon: _mapSearchCtrl.text.isNotEmpty
@@ -220,8 +204,8 @@ class _MapPageState extends State<MapPage> {
                               message: 'Lọc theo đánh giá & khoảng cách',
                               child: Material(
                                 color: state.hasActiveFilter
-                                    ? AppTheme.primaryGreen
-                                    : AppTheme.surfaceWhite,
+                                    ? cs.primary
+                                    : cs.surface,
                                 borderRadius: BorderRadius.circular(12),
                                 elevation: 2,
                                 child: InkWell(
@@ -236,8 +220,8 @@ class _MapPageState extends State<MapPage> {
                                     child: Icon(
                                       Icons.tune_rounded,
                                       color: state.hasActiveFilter
-                                          ? Colors.white
-                                          : AppTheme.primaryGreen,
+                                          ? cs.onPrimary
+                                          : cs.primary,
                                       size: 21,
                                     ),
                                   ),
@@ -258,10 +242,12 @@ class _MapPageState extends State<MapPage> {
                                       children: [
                                         if (state.minRatingFilter != null)
                                           _buildMapFilterBadge(
+                                            context,
                                             'Từ ${state.minRatingFilter!.toStringAsFixed(1)} ⭐',
                                           ),
                                         if (state.maxDistanceKmFilter != null)
                                           _buildMapFilterBadge(
+                                            context,
                                             '0 – ${state.maxDistanceKmFilter!.round()} km',
                                           ),
                                       ],
@@ -271,14 +257,16 @@ class _MapPageState extends State<MapPage> {
                             Column(
                               children: [
                                 _floatingCircleAction(
+                                  context: context,
                                   icon: Icons.my_location_rounded,
-                                  color: AppTheme.primaryGreen,
+                                  color: cs.primary,
                                   onTap: _recenterToRealGps,
                                 ),
                                 const SizedBox(height: 8),
                                 _floatingCircleAction(
+                                  context: context,
                                   icon: Icons.layers_outlined,
-                                  color: AppTheme.textSecondary,
+                                  color: cs.onSurfaceVariant,
                                   onTap: () {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
@@ -307,9 +295,67 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
+  Marker _buildUserLocationMarker(
+    BuildContext context,
+    ShopDiscoveryState state,
+  ) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
+    return Marker(
+      point: LatLng(state.userLat, state.userLng),
+      width: 136,
+      height: 82,
+      child: Tooltip(
+        message:
+            'Vị trí của bạn (${state.userLat.toStringAsFixed(5)}, ${state.userLng.toStringAsFixed(5)})',
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: appColors.info,
+                shape: BoxShape.circle,
+                border: Border.all(color: cs.surface, width: 2.5),
+                boxShadow: appColors.cardShadow,
+              ),
+              child: Icon(
+                Icons.person_pin_circle_rounded,
+                color: cs.onPrimary,
+                size: 22,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: appColors.info,
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: appColors.cardShadow,
+              ),
+              child: Text(
+                'Vị trí của bạn',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tt.badgeOnPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Marker _buildShopMarker(BuildContext context, ShopEntity shop) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
     final shortName = shop.name.split(' - ').first;
     final distanceLabel = '${shop.distanceKm.toStringAsFixed(1)} km';
+
     return Marker(
       point: LatLng(shop.latitude, shop.longitude),
       width: 158,
@@ -323,14 +369,14 @@ class _MapPageState extends State<MapPage> {
               width: 34,
               height: 34,
               decoration: BoxDecoration(
-                color: AppTheme.primaryGreen,
+                color: cs.primary,
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2.5),
-                boxShadow: AppTheme.softCardShadow,
+                border: Border.all(color: cs.surface, width: 2.5),
+                boxShadow: appColors.cardShadow,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.content_cut_rounded,
-                color: Colors.white,
+                color: cs.onPrimary,
                 size: 17,
               ),
             ),
@@ -338,9 +384,9 @@ class _MapPageState extends State<MapPage> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: cs.surface,
                 borderRadius: BorderRadius.circular(9),
-                boxShadow: AppTheme.softCardShadow,
+                boxShadow: appColors.cardShadow,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -349,29 +395,21 @@ class _MapPageState extends State<MapPage> {
                     shortName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.textPrimary,
-                    ),
+                    style: tt.captionStrong,
                   ),
                   const SizedBox(height: 1),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.near_me_rounded,
                         size: 10,
-                        color: AppTheme.primaryGreen,
+                        color: cs.primary,
                       ),
                       const SizedBox(width: 3),
                       Text(
                         distanceLabel,
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.primaryGreen,
-                        ),
+                        style: tt.badgePrimary,
                       ),
                     ],
                   ),
@@ -384,32 +422,34 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
-  Widget _buildMapFilterBadge(String text) {
+  Widget _buildMapFilterBadge(BuildContext context, String text) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cs.surface,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: AppTheme.softCardShadow,
+        boxShadow: appColors.cardShadow,
       ),
       child: Text(
         text,
-        style: const TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w700,
-          color: AppTheme.primaryGreen,
-        ),
+        style: tt.badgePrimary,
       ),
     );
   }
 
   Widget _floatingCircleAction({
+    required BuildContext context,
     required IconData icon,
     required Color color,
     required VoidCallback onTap,
   }) {
+    final cs = context.colorScheme;
     return Material(
-      color: Colors.white,
+      color: cs.surface,
       shape: const CircleBorder(),
       elevation: 2,
       child: InkWell(
@@ -424,4 +464,3 @@ class _MapPageState extends State<MapPage> {
     );
   }
 }
-

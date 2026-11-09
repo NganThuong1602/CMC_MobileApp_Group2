@@ -106,6 +106,7 @@ class ShopRepositoryImpl implements ShopRepository {
         distanceKm: double.parse(dist.toStringAsFixed(1)),
       );
     }).where((shop) {
+      if (!shop.isActive) return false;
       if (minRating != null && shop.rating < minRating) return false;
       if (query.isEmpty) return true;
       return shop.name.toLowerCase().contains(query) ||
@@ -127,7 +128,8 @@ class ShopRepositoryImpl implements ShopRepository {
     } catch (_) {}
 
     final now = DateTime.now();
-    final list = db.shops.where((s) => s.isHighlightedAt(now)).toList();
+    final list =
+        db.shops.where((s) => s.isActive && s.isHighlightedAt(now)).toList();
     return Result.success(list);
   }
 
@@ -154,6 +156,9 @@ class ShopRepositoryImpl implements ShopRepository {
         _syncShopBundle(bundle);
         return Result.success(bundle.shop);
       }
+      // Khi Backend trả về null (chưa đăng ký hoặc đã bị Admin từ chối/xoá) -> xoá cache cũ để cho phép đăng ký lại
+      db.shops.removeWhere((s) => s.ownerId == ownerId);
+      return Result.success(null);
     } catch (_) {}
 
     final idx = db.shops.indexWhere((s) => s.ownerId == ownerId);
@@ -213,6 +218,10 @@ class ShopRepositoryImpl implements ShopRepository {
             ? coverImageUrl.trim()
             : 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=900&q=80';
 
+    final resolvedDesc = description.trim().isEmpty
+        ? 'Không gian cắt tóc chuyên nghiệp dành cho phái mạnh.'
+        : description.trim();
+
     try {
       final tx = await remote.createRegisterShopQr({
         'name': cleanName,
@@ -220,9 +229,7 @@ class ShopRepositoryImpl implements ShopRepository {
         'phone': phone.trim(),
         'openTime': openTime,
         'closeTime': closeTime,
-        'description': description.trim().isEmpty
-            ? 'Không gian cắt tóc chuyên nghiệp dành cho phái mạnh.'
-            : description.trim(),
+        'description': resolvedDesc,
         'coverUrl': resolvedCover,
         'galleryUrls': [resolvedCover],
         'latitude': latitude,
@@ -230,6 +237,18 @@ class ShopRepositoryImpl implements ShopRepository {
       });
       db.transactions.removeWhere((t) => t.paymentCode == tx.paymentCode);
       db.transactions.add(tx);
+      db.pendingShopDraftsByPaymentCode[tx.paymentCode] = PendingShopDraft(
+        userId: userId,
+        name: cleanName,
+        address: cleanAddr,
+        phone: phone.trim(),
+        description: resolvedDesc,
+        openTime: openTime,
+        closeTime: closeTime,
+        latitude: latitude,
+        longitude: longitude,
+        coverImageUrl: resolvedCover,
+      );
       return Result.success(tx);
     } on DioException catch (e) {
       if (e.response != null) {
@@ -364,15 +383,25 @@ class ShopRepositoryImpl implements ShopRepository {
     }
 
     final tx = db.transactions[txIdx];
+    bool remoteSynced = false;
+    PaymentTransactionEntity? remoteTx;
     try {
-      await remote.triggerSePayWebhook(
+      remoteTx = await remote.triggerSePayWebhook(
         transferContent: tx.transferContent,
         amount: tx.amount,
       );
+      if (tx.type == 'REGISTER_SHOP') {
+        final bundle = await remote.getMyOwnedShop();
+        if (bundle != null) {
+          _syncShopBundle(bundle);
+          db.pendingShopDraftsByPaymentCode.remove(paymentCode);
+          remoteSynced = true;
+        }
+      }
     } catch (_) {}
 
     final completedTx = PaymentTransactionEntity(
-      id: tx.id,
+      id: remoteTx?.id.isNotEmpty == true ? remoteTx!.id : tx.id,
       userId: tx.userId,
       type: tx.type,
       amount: tx.amount,
@@ -380,14 +409,16 @@ class ShopRepositoryImpl implements ShopRepository {
       transferContent: tx.transferContent,
       qrImageUrl: tx.qrImageUrl,
       status: 'SUCCESS',
-      referenceId: tx.referenceId,
+      referenceId: remoteTx?.referenceId ?? tx.referenceId,
     );
     db.transactions[txIdx] = completedTx;
 
-    if (tx.type == 'REGISTER_SHOP') {
+    if (tx.type == 'REGISTER_SHOP' && !remoteSynced) {
       final draft = db.pendingShopDraftsByPaymentCode.remove(paymentCode);
       if (draft != null) {
         final newShopId = 'shop_${DateTime.now().millisecondsSinceEpoch}';
+        final ownerIdx = db.users.indexWhere((u) => u.id == draft.userId);
+        final ownerUser = ownerIdx != -1 ? db.users[ownerIdx] : db.currentUser;
         db.shops.insert(
           0,
           ShopEntity(
@@ -406,6 +437,10 @@ class ShopRepositoryImpl implements ShopRepository {
             rating: 5.0,
             reviewCount: 0,
             distanceKm: 0.5,
+            isActive: false, // Chờ duyệt bởi Admin
+            ownerName: ownerUser?.fullName ?? '',
+            ownerPhone: ownerUser?.phone ?? '',
+            ownerEmail: ownerUser?.email ?? '',
           ),
         );
         db.services.add(
@@ -418,14 +453,35 @@ class ShopRepositoryImpl implements ShopRepository {
           ),
         );
 
-        final uIdx = db.users.indexWhere((u) => u.id == draft.userId);
-        if (uIdx != -1) {
-          final promoted = db.users[uIdx].copyWith(role: UserRole.manager);
-          db.users[uIdx] = promoted;
-          if (db.currentUser?.id == promoted.id) {
-            db.currentUser = promoted;
-          }
+        for (final admin in db.users.where((u) => u.role == UserRole.admin)) {
+          db.notifications.insert(
+            0,
+            AppNotificationEntity(
+              id: 'notif_admin_${DateTime.now().millisecondsSinceEpoch}',
+              userId: admin.id,
+              title: 'Yêu cầu duyệt mở quán mới',
+              body:
+                  'Quán "${draft.name}" (${draft.address}) vừa thanh toán lệ phí và đang chờ Admin phê duyệt.',
+              type: NotificationType.shopApproval,
+              targetShopId: newShopId,
+              createdAt: DateTime.now(),
+            ),
+          );
         }
+
+        db.notifications.insert(
+          0,
+          AppNotificationEntity(
+            id: 'notif_owner_${DateTime.now().millisecondsSinceEpoch}',
+            userId: draft.userId,
+            title: 'Đã gửi hồ sơ đăng ký quán (Chờ duyệt)',
+            body:
+                'Quán "${draft.name}" đang ở trạng thái Chờ duyệt bởi Admin hệ thống.',
+            type: NotificationType.shopApproval,
+            targetShopId: newShopId,
+            createdAt: DateTime.now(),
+          ),
+        );
       }
     } else if (tx.type == 'BUY_HIGHLIGHT') {
       final pkg = db.pendingHighlightByPaymentCode.remove(paymentCode);
@@ -555,6 +611,22 @@ class ShopRepositoryImpl implements ShopRepository {
         );
         db.services.add(created);
         return Result.success(created);
+      } catch (_) {}
+    } else {
+      try {
+        final updated = await remote.updateShopService(
+          serviceId: serviceId,
+          name: name.trim(),
+          price: price,
+          durationMinutes: durationMinutes,
+        );
+        final idx = db.services.indexWhere((s) => s.id == serviceId);
+        if (idx != -1) {
+          db.services[idx] = updated;
+        } else {
+          db.services.add(updated);
+        }
+        return Result.success(updated);
       } catch (_) {}
     }
 
@@ -686,5 +758,115 @@ class ShopRepositoryImpl implements ShopRepository {
         barberPayrolls: payrolls,
       ),
     );
+  }
+
+  @override
+  Future<Result<List<ShopEntity>>> getAdminPendingShops() async {
+    try {
+      final remoteShops = await remote.getAdminPendingShops();
+      return Result.success(remoteShops);
+    } catch (_) {}
+
+    final pending = db.shops.where((s) => !s.isActive).toList();
+    return Result.success(pending);
+  }
+
+  @override
+  Future<Result<List<ShopEntity>>> getAdminActiveShops() async {
+    try {
+      final remoteShops = await remote.getAdminActiveShops();
+      return Result.success(remoteShops);
+    } catch (_) {}
+
+    final active = db.shops.where((s) => s.isActive).toList();
+    return Result.success(active);
+  }
+
+  @override
+  Future<Result<ShopEntity>> approveShopByAdmin(String shopId) async {
+    try {
+      final approved = await remote.approveShopByAdmin(shopId);
+      final sIdx = db.shops.indexWhere((s) => s.id == shopId);
+      if (sIdx != -1) {
+        db.shops[sIdx] = approved;
+      } else {
+        db.shops.add(approved);
+      }
+      return Result.success(approved);
+    } on DioException catch (e) {
+      if (e.response != null) {
+        return Result.failure(
+          ValidationFailure(_extractDioError(e, 'Không thể phê duyệt quán')),
+        );
+      }
+    } catch (_) {}
+
+    final sIdx = db.shops.indexWhere((s) => s.id == shopId);
+    if (sIdx == -1) {
+      return Result.failure(const ValidationFailure('Không tìm thấy quán'));
+    }
+    final approved = db.shops[sIdx].copyWith(isActive: true);
+    db.shops[sIdx] = approved;
+
+    final uIdx = db.users.indexWhere((u) => u.id == approved.ownerId);
+    if (uIdx != -1 && db.users[uIdx].role != UserRole.admin) {
+      db.users[uIdx] = db.users[uIdx].copyWith(role: UserRole.manager);
+    }
+
+    db.notifications.insert(
+      0,
+      AppNotificationEntity(
+        id: 'notif_appr_${DateTime.now().millisecondsSinceEpoch}',
+        userId: approved.ownerId,
+        title: 'Quán của bạn đã được Admin phê duyệt!',
+        body:
+            'Chúc mừng! Quán "${approved.name}" đã được Admin duyệt hoạt động. Tài khoản của bạn đã được nâng cấp thành Quản lý quán.',
+        type: NotificationType.shopApproval,
+        targetShopId: approved.id,
+        createdAt: DateTime.now(),
+      ),
+    );
+
+    return Result.success(approved);
+  }
+
+  @override
+  Future<Result<void>> deleteShopByAdmin(String shopId) async {
+    try {
+      await remote.deleteShopByAdmin(shopId);
+      db.shops.removeWhere((s) => s.id == shopId);
+      return Result.success(null);
+    } on DioException catch (e) {
+      if (e.response != null) {
+        return Result.failure(
+          ValidationFailure(_extractDioError(e, 'Không thể xoá quán')),
+        );
+      }
+    } catch (_) {}
+
+    final sIdx = db.shops.indexWhere((s) => s.id == shopId);
+    if (sIdx != -1) {
+      final removed = db.shops.removeAt(sIdx);
+      final uIdx = db.users.indexWhere((u) => u.id == removed.ownerId);
+      if (uIdx != -1 && db.users[uIdx].role == UserRole.manager) {
+        db.users[uIdx] = db.users[uIdx].copyWith(role: UserRole.user);
+      }
+      db.notifications.insert(
+        0,
+        AppNotificationEntity(
+          id: 'notif_del_${DateTime.now().millisecondsSinceEpoch}',
+          userId: removed.ownerId,
+          title: removed.isActive
+              ? 'Quán "${removed.name}" đã bị xoá khỏi hệ thống'
+              : 'Yêu cầu mở quán "${removed.name}" đã bị từ chối',
+          body: removed.isActive
+              ? 'Admin hệ thống đã gỡ quán "${removed.name}".'
+              : 'Yêu cầu đăng ký mở quán "${removed.name}" chưa được Admin phê duyệt.',
+          type: NotificationType.shopApproval,
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+    return Result.success(null);
   }
 }

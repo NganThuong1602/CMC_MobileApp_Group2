@@ -7,6 +7,7 @@ import '../blocs/shop_discovery/shop_discovery_cubit.dart';
 /// - Lọc theo mức đánh giá sao (Tất cả, Từ 4.0⭐, 4.5⭐, 4.8⭐, 4.9⭐)
 /// - Lọc theo khoảng cách bằng thanh trượt từ 1km -> 20km (lọc các quán từ 0 km đến mức thanh trượt đang chọn)
 /// - Cuối bảng có 2 nút hành động rõ ràng: "Xoá lọc" và "Tìm kiếm"
+/// Toàn bộ màu sắc & kiểu chữ kế thừa tự động từ [AppTheme].
 class ShopFilterBottomSheet extends StatefulWidget {
   final double? initialMinRating;
   final double? initialMaxDistanceKm;
@@ -31,7 +32,7 @@ class ShopFilterBottomSheet extends StatefulWidget {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.surfaceWhite,
+      backgroundColor: context.colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -78,6 +79,8 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final ts = context.appTextStyles;
     final kmLabel = _sliderDistanceKm.round();
 
     return SafeArea(
@@ -94,7 +97,7 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
                   width: 42,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
+                    color: cs.outline,
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
@@ -102,20 +105,16 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
               const SizedBox(height: 14),
               Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.tune_rounded,
-                    color: AppTheme.primaryGreen,
+                    color: cs.primary,
                     size: 21,
                   ),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Bộ lọc tiệm cắt tóc',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.textPrimary,
-                      ),
+                      style: ts.dialogTitle,
                     ),
                   ),
                   IconButton(
@@ -126,13 +125,9 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
                 ],
               ),
               const Divider(height: 20),
-              const Text(
+              Text(
                 '1. Lọc theo đánh giá',
-                style: TextStyle(
-                  fontSize: 14.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
-                ),
+                style: ts.cardTitle,
               ),
               const SizedBox(height: 10),
               Wrap(
@@ -144,18 +139,12 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
                   return ChoiceChip(
                     label: Text(
                       label,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight:
-                            isSelected ? FontWeight.w700 : FontWeight.w500,
-                        color:
-                            isSelected ? Colors.white : AppTheme.textPrimary,
-                      ),
+                      style: isSelected ? ts.bodySmallOnPrimary : ts.bodySmallStrong,
                     ),
                     selected: isSelected,
-                    selectedColor: AppTheme.primaryGreen,
-                    backgroundColor: AppTheme.inputFill,
-                    checkmarkColor: Colors.white,
+                    selectedColor: cs.primary,
+                    backgroundColor: cs.surfaceContainer,
+                    checkmarkColor: cs.onPrimary,
                     onSelected: (_) {
                       setState(() => _selectedRating = val);
                     },
@@ -165,14 +154,10 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
               const SizedBox(height: 20),
               Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       '2. Khoảng cách tối đa',
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textPrimary,
-                      ),
+                      style: ts.cardTitle,
                     ),
                   ),
                   Container(
@@ -181,16 +166,12 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryGreenLight,
+                      color: cs.primaryContainer,
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
                       '0 km – $kmLabel km',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.primaryGreen,
-                      ),
+                      style: ts.bodySmallPrimary,
                     ),
                   ),
                 ],
@@ -198,16 +179,12 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
               const SizedBox(height: 4),
               SliderTheme(
                 data: SliderTheme.of(context).copyWith(
-                  activeTrackColor: AppTheme.primaryGreen,
-                  inactiveTrackColor: AppTheme.primaryGreenLight,
-                  thumbColor: AppTheme.primaryGreen,
-                  overlayColor: AppTheme.primaryGreen.withValues(alpha: 0.14),
-                  valueIndicatorColor: AppTheme.primaryGreen,
-                  valueIndicatorTextStyle: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                  ),
+                  activeTrackColor: cs.primary,
+                  inactiveTrackColor: cs.primaryContainer,
+                  thumbColor: cs.primary,
+                  overlayColor: cs.primaryContainer,
+                  valueIndicatorColor: cs.primary,
+                  valueIndicatorTextStyle: ts.captionOnPrimary,
                 ),
                 child: Slider(
                   value: _sliderDistanceKm,
@@ -220,33 +197,22 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
                   },
                 ),
               ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 6),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       '1 km',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: AppTheme.textSecondary,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: ts.captionMuted,
                     ),
                     Text(
                       'Lọc các quán từ 0 km đến mức đang chọn',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: AppTheme.textSecondary,
-                      ),
+                      style: ts.captionMuted,
                     ),
                     Text(
                       '20 km',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: AppTheme.textSecondary,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: ts.captionMuted,
                     ),
                   ],
                 ),
@@ -263,19 +229,16 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size(0, 46),
                         padding: const EdgeInsets.symmetric(horizontal: 10),
-                        foregroundColor: AppTheme.dangerRed,
-                        side: const BorderSide(color: AppTheme.dangerRed),
+                        foregroundColor: cs.error,
+                        side: BorderSide(color: cs.error),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
                       icon: const Icon(Icons.filter_alt_off_rounded, size: 18),
-                      label: const Text(
+                      label: Text(
                         'Xoá lọc',
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
-                        ),
+                        style: ts.buttonLabelDanger,
                       ),
                     ),
                   ),
@@ -292,19 +255,16 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size(0, 46),
                         padding: const EdgeInsets.symmetric(horizontal: 10),
-                        backgroundColor: AppTheme.primaryGreen,
-                        foregroundColor: Colors.white,
+                        backgroundColor: cs.primary,
+                        foregroundColor: cs.onPrimary,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
                       icon: const Icon(Icons.search_rounded, size: 18),
-                      label: const Text(
+                      label: Text(
                         'Tìm kiếm',
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
-                        ),
+                        style: ts.buttonLabel,
                       ),
                     ),
                   ),
@@ -317,4 +277,3 @@ class _ShopFilterBottomSheetState extends State<ShopFilterBottomSheet> {
     );
   }
 }
-

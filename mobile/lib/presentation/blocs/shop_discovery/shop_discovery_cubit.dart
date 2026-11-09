@@ -213,6 +213,26 @@ class ShopDiscoveryCubit extends Cubit<ShopDiscoveryState> {
     return false;
   }
 
+  /// Cho phép cập nhật trực tiếp tọa độ vị trí hiện tại của người dùng trên bản đồ
+  /// và tính lại khoảng cách thực tế tới tất cả các quán.
+  Future<void> setCustomUserLocation({
+    required double latitude,
+    required double longitude,
+    String? userId,
+  }) async {
+    emit(
+      state.copyWith(
+        locationPermissionAsked: true,
+        locationGranted: true,
+        hasRealDeviceGps: true,
+        userLat: latitude,
+        userLng: longitude,
+        locationUpdateRevision: state.locationUpdateRevision + 1,
+      ),
+    );
+    await loadAll(userId: userId);
+  }
+
   Future<void> updateSearch(String query) async {
     emit(state.copyWith(searchQuery: query));
     await loadAll();

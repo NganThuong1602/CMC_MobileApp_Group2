@@ -2,23 +2,69 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_constants.dart';
+import '../../../core/di/injection_container.dart';
 import '../../../core/enums/app_enums.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../domain/entities/shop_entity.dart';
+import '../../../domain/repositories/shop_repository.dart';
 import '../../blocs/auth/auth_cubit.dart';
 import '../../blocs/shop_discovery/shop_discovery_cubit.dart';
 import '../../widgets/barbersmart_header.dart';
 
-/// Màn hình Tài khoản / Hồ Sơ chuẩn Pixel-perfect theo Ảnh 7:
-/// - Avatar tròn to chính giữa kèm huy hiệu tích xanh `#00A859`.
-/// - Họ tên đậm + Pill `Thành viên thân thiết`.
-/// - 3 Card trắng: `Thông báo`, `Lịch đã đặt` (Hủy lịch), `Đăng ký quán` (lên đời Manager qua SePay 100k).
-/// - Nút chữ đỏ `Đăng xuất` (dọn sạch session, bắn state Unauthenticated để GoRouter redirect thẳng `/login`).
-class AccountPage extends StatelessWidget {
-  const AccountPage({super.key});
+/// Màn hình Tài khoản / Hồ Sơ chuẩn Pixel-perfect:
+/// - Avatar tròn to chính giữa kèm huy hiệu tích xanh.
+/// - Họ tên đậm + Pill vai trò tài khoản.
+/// - 3 Card: `Thông báo`, `Lịch đã đặt`, `Đăng ký quán` (làm mờ khi đã là Manager/Admin hoặc đang có quán Chờ duyệt).
+/// - Nút `Đăng xuất`.
+class AccountPage extends StatefulWidget {
+  final bool isActiveTab;
+
+  const AccountPage({super.key, this.isActiveTab = false});
+
+  @override
+  State<AccountPage> createState() => _AccountPageState();
+}
+
+class _AccountPageState extends State<AccountPage> {
+  ShopEntity? _ownedOrPendingShop;
+  String? _loadedUserId;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final user = context.read<AuthCubit>().state.user;
+    if (user != null && _loadedUserId != user.id) {
+      _loadedUserId = user.id;
+      _checkOwnedOrPendingShop(user.id);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant AccountPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActiveTab && !oldWidget.isActiveTab) {
+      final user = context.read<AuthCubit>().state.user;
+      if (user != null) {
+        _checkOwnedOrPendingShop(user.id);
+      }
+    }
+  }
+
+  Future<void> _checkOwnedOrPendingShop(String userId) async {
+    final res = await sl<ShopRepository>().getShopByOwnerId(userId);
+    if (!mounted) return;
+    setState(() {
+      _ownedOrPendingShop = res.data;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
     final user = context.watch<AuthCubit>().state.user;
+
     if (user == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (context.mounted) {
@@ -26,7 +72,7 @@ class AccountPage extends StatelessWidget {
         }
       });
       return const Center(
-        child: CircularProgressIndicator(color: AppTheme.primaryGreen),
+        child: CircularProgressIndicator(),
       );
     }
 
@@ -38,7 +84,28 @@ class AccountPage extends StatelessWidget {
     final badgeLabel = switch (user.role) {
       UserRole.manager => 'Chủ tiệm • Quản lý quán',
       UserRole.barber => 'Barber chuyên nghiệp',
+      UserRole.admin => 'Quản trị viên hệ thống (Admin)',
       UserRole.user => 'Thành viên thân thiết',
+    };
+
+    final hasPendingShop =
+        _ownedOrPendingShop != null && !_ownedOrPendingShop!.isActive;
+    final hasApprovedShop = user.role == UserRole.manager ||
+        (_ownedOrPendingShop != null && _ownedOrPendingShop!.isActive);
+    final isRegisterShopDisabled =
+        user.role == UserRole.admin || user.role == UserRole.barber;
+
+    final registerShopSubtitle = switch (user.role) {
+      UserRole.manager => 'Hồ sơ quán đã được duyệt',
+      UserRole.admin =>
+        'Tài khoản Admin chuyên trách phê duyệt & quản trị hệ thống',
+      UserRole.barber =>
+        'Tài khoản đang là Barber chính thức tại quán',
+      UserRole.user => hasPendingShop
+          ? 'Quán "${_ownedOrPendingShop!.name}" đang Chờ duyệt'
+          : hasApprovedShop
+              ? 'Quán "${_ownedOrPendingShop!.name}" đã được duyệt'
+              : 'Mở rộng kinh doanh cùng BarberSmart',
     };
 
     return BlocBuilder<ShopDiscoveryCubit, ShopDiscoveryState>(
@@ -53,6 +120,7 @@ class AccountPage extends StatelessWidget {
                   context
                       .read<ShopDiscoveryCubit>()
                       .loadAll(userId: user.id);
+                  _checkOwnedOrPendingShop(user.id);
                 }
               },
               onProfileSocialTap: () => context.push('/profile-social'),
@@ -64,7 +132,6 @@ class AccountPage extends StatelessWidget {
                   vertical: 20,
                 ),
                 children: [
-                  // Khối thông tin Avatar tròn to + tích xanh + Tên + Badge
                   GestureDetector(
                     onTap: () => context.push('/profile-social'),
                     child: Column(
@@ -76,12 +143,12 @@ class AccountPage extends StatelessWidget {
                               padding: const EdgeInsets.all(3),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: Colors.white,
-                                boxShadow: AppTheme.softCardShadow,
+                                color: cs.surface,
+                                boxShadow: appColors.cardShadow,
                               ),
                               child: CircleAvatar(
                                 radius: 46,
-                                backgroundColor: const Color(0xFFE5E7EB),
+                                backgroundColor: cs.surfaceContainerHighest,
                                 backgroundImage: NetworkImage(avatarUrl),
                                 onBackgroundImageError: (_, __) {},
                               ),
@@ -89,21 +156,24 @@ class AccountPage extends StatelessWidget {
                             Positioned(
                               right: 0,
                               bottom: 2,
-                              child: Container(
-                                width: 28,
-                                height: 28,
-                                decoration: BoxDecoration(
-                                  color: AppTheme.primaryGreen,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: Colors.white,
-                                    width: 2.5,
+                              child: Tooltip(
+                                message: badgeLabel,
+                                child: Container(
+                                  width: 28,
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: cs.primary,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: cs.surface,
+                                      width: 2.5,
+                                    ),
                                   ),
-                                ),
-                                child: const Icon(
-                                  Icons.verified_user_outlined,
-                                  size: 15,
-                                  color: Colors.white,
+                                  child: Icon(
+                                    user.role.roleIcon,
+                                    size: 15,
+                                    color: cs.onPrimary,
+                                  ),
                                 ),
                               ),
                             ),
@@ -112,11 +182,7 @@ class AccountPage extends StatelessWidget {
                         const SizedBox(height: 12),
                         Text(
                           user.fullName,
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.textPrimary,
-                          ),
+                          style: tt.pageTitle,
                         ),
                         const SizedBox(height: 6),
                         Container(
@@ -125,25 +191,12 @@ class AccountPage extends StatelessWidget {
                             vertical: 5,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFEAF0F8),
+                            color: cs.secondaryContainer,
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
                             badgeLabel,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF4A5568),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          'Chạm vào ảnh để mở Trang cá nhân & Mạng xã hội',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: AppTheme.primaryGreen,
-                            fontWeight: FontWeight.w600,
+                            style: tt.badgeSecondary,
                           ),
                         ),
                       ],
@@ -151,6 +204,7 @@ class AccountPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
                   _buildMenuCard(
+                    context: context,
                     icon: Icons.notifications_none_rounded,
                     title: 'Thông báo',
                     subtitle: 'Cập nhật lịch hẹn và ưu đãi',
@@ -161,41 +215,55 @@ class AccountPage extends StatelessWidget {
                         context
                             .read<ShopDiscoveryCubit>()
                             .loadAll(userId: user.id);
+                        _checkOwnedOrPendingShop(user.id);
                       }
                     },
                   ),
                   const SizedBox(height: 12),
                   _buildMenuCard(
+                    context: context,
                     icon: Icons.calendar_month_outlined,
                     title: 'Lịch đã đặt',
                     subtitle: 'Quản lý các cuộc hẹn sắp tới & Hủy lịch',
                     onTap: () => context.push('/my-bookings'),
                   ),
                   const SizedBox(height: 12),
-                  _buildMenuCard(
-                    icon: Icons.storefront_outlined,
-                    title: 'Đăng ký quán',
-                    subtitle: 'Mở rộng kinh doanh cùng BarberSmart',
-                    onTap: () => context.push('/register-shop'),
+                  Opacity(
+                    opacity: isRegisterShopDisabled ? 0.45 : 1.0,
+                    child: _buildMenuCard(
+                      context: context,
+                      icon: Icons.storefront_outlined,
+                      title: 'Đăng ký quán',
+                      subtitle: registerShopSubtitle,
+                      disabled: isRegisterShopDisabled,
+                      statusBadgeText: hasPendingShop
+                          ? 'Chờ duyệt'
+                          : (hasApprovedShop ? 'Đã duyệt' : null),
+                      isApprovedBadge: hasApprovedShop && !hasPendingShop,
+                      onTap: () async {
+                        if (isRegisterShopDisabled) return;
+                        await context.push('/register-shop');
+                        if (context.mounted) {
+                          _checkOwnedOrPendingShop(user.id);
+                        }
+                      },
+                    ),
                   ),
                   const SizedBox(height: 28),
                   Center(
                     child: TextButton.icon(
                       onPressed: () => context.read<AuthCubit>().logout(),
                       style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.dangerRed,
+                        foregroundColor: cs.error,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 20,
                           vertical: 12,
                         ),
                       ),
                       icon: const Icon(Icons.logout_rounded, size: 20),
-                      label: const Text(
+                      label: Text(
                         'Đăng xuất',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
+                        style: tt.buttonLabelDanger,
                       ),
                     ),
                   ),
@@ -209,34 +277,42 @@ class AccountPage extends StatelessWidget {
   }
 
   Widget _buildMenuCard({
+    required BuildContext context,
     required IconData icon,
     required String title,
     required String subtitle,
     required VoidCallback onTap,
     bool showDot = false,
+    bool disabled = false,
+    String? statusBadgeText,
+    bool isApprovedBadge = false,
   }) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
     return Material(
-      color: AppTheme.surfaceWhite,
+      color: cs.surface,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
+        onTap: disabled ? null : onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            boxShadow: AppTheme.softCardShadow,
+            boxShadow: appColors.cardShadow,
           ),
           child: Row(
             children: [
               Container(
                 width: 44,
                 height: 44,
-                decoration: const BoxDecoration(
-                  color: AppTheme.primaryGreenLight,
+                decoration: BoxDecoration(
+                  color: cs.primaryContainer,
                   shape: BoxShape.circle,
                 ),
-                child: Icon(icon, color: AppTheme.primaryGreen, size: 22),
+                child: Icon(icon, color: cs.primary, size: 22),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -245,36 +321,48 @@ class AccountPage extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textPrimary,
-                      ),
+                      style: tt.cardTitle,
                     ),
                     const SizedBox(height: 3),
                     Text(
                       subtitle,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppTheme.textSecondary,
-                      ),
+                      style: tt.bodySmallMuted,
                     ),
                   ],
                 ),
               ),
+              if (statusBadgeText != null)
+                Container(
+                  margin: const EdgeInsets.only(right: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isApprovedBadge
+                        ? cs.primaryContainer
+                        : appColors.warningContainer,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    statusBadgeText,
+                    style: tt.badgePrimary,
+                  ),
+                ),
               if (showDot)
                 Container(
                   width: 8,
                   height: 8,
                   margin: const EdgeInsets.only(right: 6),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFD97706),
+                  decoration: BoxDecoration(
+                    color: appColors.warning,
                     shape: BoxShape.circle,
                   ),
                 ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: AppTheme.textSecondary,
+              Icon(
+                disabled ? Icons.lock_outline_rounded : Icons.chevron_right_rounded,
+                color: cs.onSurfaceVariant,
+                size: disabled ? 19 : 24,
               ),
             ],
           ),
@@ -283,4 +371,3 @@ class AccountPage extends StatelessWidget {
     );
   }
 }
-

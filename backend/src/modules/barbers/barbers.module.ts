@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Injectable,
@@ -69,10 +70,15 @@ export class BarbersService {
 
   /**
    * Mời làm Barber:
-   * - Manager KHÔNG được tự làm Barber.
+   * - Manager / Admin KHÔNG được tự làm Barber.
    * - Nếu User đã thuộc quán khác (đang là Barber) hoặc là Manager -> Báo lỗi!
+   * - Gửi thông báo thật tới tài khoản được mời kèm mức lương cứng đề xuất.
    */
-  async inviteBarber(managerId: string, emailOrPhone: string) {
+  async inviteBarber(
+    managerId: string,
+    emailOrPhone: string,
+    baseSalary = 6500000,
+  ) {
     const shop = await this.shopRepo.findOne({ where: { ownerId: managerId } });
     if (!shop) {
       throw new ForbiddenException('Bạn chưa sở hữu quán nào');
@@ -88,9 +94,13 @@ export class BarbersService {
       );
     }
 
-    if (candidate.id === managerId || candidate.role === UserRole.MANAGER) {
+    if (
+      candidate.id === managerId ||
+      candidate.role === UserRole.MANAGER ||
+      candidate.role === UserRole.ADMIN
+    ) {
       throw new BadRequestException(
-        'Quản lý quán không được phép kiêm nhiệm làm Barber',
+        'Quản lý hoặc Admin không được phép kiêm nhiệm làm Barber',
       );
     }
 
@@ -105,18 +115,31 @@ export class BarbersService {
       );
     }
 
+    const validSalary =
+      baseSalary && baseSalary > 0 ? Math.round(baseSalary) : 6500000;
+
     await this.notificationsService.createAndPush({
       recipientId: candidate.id,
       title: `Lời mời làm Barber tại ${shop.name}`,
-      body: `Quản lý quán ${shop.name} mời bạn gia nhập đội ngũ Barber.`,
+      body: `Quản lý quán "${shop.name}" mời bạn gia nhập đội ngũ Barber với lương cứng ${validSalary.toLocaleString('vi-VN')}đ + 10% hoa hồng. Hãy nhấn Chấp nhận hoặc Từ chối.`,
       type: NotificationType.BARBER_INVITE,
-      metadata: { shopId: shop.id, shopName: shop.name },
+      metadata: {
+        shopId: shop.id,
+        shopName: shop.name,
+        baseSalary: validSalary,
+      },
     });
 
-    return { message: `Đã gửi lời mời làm Barber tới ${candidate.fullName}` };
+    return {
+      message: `Đã gửi lời mời làm Barber tới ${candidate.fullName}`,
+    };
   }
 
-  async respondInvitation(userId: string, notificationId: string, accept: boolean) {
+  async respondInvitation(
+    userId: string,
+    notificationId: string,
+    accept: boolean,
+  ) {
     const noti = await this.notiRepo.findOne({
       where: { id: notificationId, recipientId: userId },
     });
@@ -125,16 +148,34 @@ export class BarbersService {
     }
 
     noti.isRead = true;
-    noti.metadata = { ...(noti.metadata ?? {}), responded: true, accepted: accept };
+    noti.metadata = {
+      ...(noti.metadata ?? {}),
+      responded: true,
+      accepted: accept,
+    };
     await this.notiRepo.save(noti);
 
+    const shopId = noti.metadata?.shopId as string;
+    const shop = shopId
+      ? await this.shopRepo.findOne({ where: { id: shopId } })
+      : null;
+    const user = await this.userRepo.findOneOrFail({ where: { id: userId } });
+
     if (!accept) {
+      if (shop) {
+        await this.notificationsService.createAndPush({
+          recipientId: shop.ownerId,
+          title: 'Ứng viên từ chối lời mời Barber',
+          body: `${user.fullName} đã từ chối lời mời làm Barber tại ${shop.name}.`,
+          type: NotificationType.SYSTEM,
+          metadata: { shopId: shop.id },
+        });
+      }
       return { accepted: false };
     }
 
-    const user = await this.userRepo.findOneOrFail({ where: { id: userId } });
-    if (user.role === UserRole.MANAGER) {
-      throw new BadRequestException('Manager không được tự làm Barber');
+    if (user.role === UserRole.MANAGER || user.role === UserRole.ADMIN) {
+      throw new BadRequestException('Manager/Admin không được tự làm Barber');
     }
 
     const existing = await this.barberRepo.findOne({ where: { userId } });
@@ -142,18 +183,28 @@ export class BarbersService {
       throw new ConflictException('Bạn đã thuộc một quán cắt tóc khác');
     }
 
-    const shopId = noti.metadata?.shopId as string;
+    const baseSalary = Number(noti.metadata?.baseSalary) || 6500000;
     const newBarber = await this.barberRepo.save(
       this.barberRepo.create({
         userId,
         shopId,
-        baseSalary: 6000000,
+        baseSalary,
         isActive: true,
       }),
     );
 
     user.role = UserRole.BARBER;
     await this.userRepo.save(user);
+
+    if (shop) {
+      await this.notificationsService.createAndPush({
+        recipientId: shop.ownerId,
+        title: 'Barber mới đã gia nhập quán!',
+        body: `${user.fullName} đã chấp nhận lời mời làm Barber tại ${shop.name}.`,
+        type: NotificationType.SYSTEM,
+        metadata: { shopId: shop.id, barberId: newBarber.id },
+      });
+    }
 
     this.realtimeGateway.emitUserRoleUpdated(userId, {
       newRole: UserRole.BARBER,
@@ -164,16 +215,55 @@ export class BarbersService {
     return { accepted: true, role: UserRole.BARBER, shopId };
   }
 
-  async updateBaseSalary(managerId: string, barberId: string, baseSalary: number) {
+  async updateBaseSalary(
+    managerId: string,
+    barberId: string,
+    baseSalary: number,
+  ) {
     const barber = await this.barberRepo.findOne({
       where: { id: barberId },
-      relations: ['shop'],
+      relations: ['shop', 'user'],
     });
     if (!barber || barber.shop.ownerId !== managerId) {
       throw new ForbiddenException('Không có quyền cập nhật lương Barber này');
     }
     barber.baseSalary = baseSalary;
     return this.barberRepo.save(barber);
+  }
+
+  /**
+   * Xoá Barber khỏi quán:
+   * - Chỉ chủ quán (Manager) mới có quyền xoá Barber của quán mình.
+   * - Xoá bản ghi BarberEntity, chuyển Role của User đó về lại USER, và gửi thông báo thật.
+   */
+  async removeBarber(managerId: string, barberId: string) {
+    const barber = await this.barberRepo.findOne({
+      where: { id: barberId },
+      relations: ['shop', 'user'],
+    });
+    if (!barber || barber.shop.ownerId !== managerId) {
+      throw new ForbiddenException('Không có quyền xoá Barber này');
+    }
+
+    const barberUserId = barber.userId;
+    const shopName = barber.shop.name;
+
+    await this.barberRepo.delete(barber.id);
+    await this.userRepo.update(barberUserId, { role: UserRole.USER });
+
+    await this.notificationsService.createAndPush({
+      recipientId: barberUserId,
+      title: `Thông báo từ quán ${shopName}`,
+      body: `Quản lý quán "${shopName}" đã kết thúc hợp tác Barber với tài khoản của bạn.`,
+      type: NotificationType.SYSTEM,
+      metadata: { shopId: barber.shopId },
+    });
+
+    this.realtimeGateway.emitUserRoleUpdated(barberUserId, {
+      newRole: UserRole.USER,
+    });
+
+    return { deleted: true, barberId };
   }
 
   async getMonthlyHeatmap(userId: string, year: number, month: number) {
@@ -230,7 +320,6 @@ export class BarbersService {
     });
     if (!barber) throw new NotFoundException('Chưa có hồ sơ Barber');
 
-    // Chỉ tính hoa hồng 10% cho các Booking đã COMPLETED
     const completed = await this.bookingRepo.find({
       where: { barberId: barber.id, status: BookingStatus.COMPLETED },
     });
@@ -265,9 +354,13 @@ export class BarbersController {
   @Post('invite')
   invite(
     @CurrentUser() user: UserEntity,
-    @Body() body: { emailOrPhone: string },
+    @Body() body: { emailOrPhone: string; baseSalary?: number },
   ) {
-    return this.service.inviteBarber(user.id, body.emailOrPhone);
+    return this.service.inviteBarber(
+      user.id,
+      body.emailOrPhone,
+      body.baseSalary,
+    );
   }
 
   @Post('invitations/:notificationId/respond')
@@ -276,7 +369,11 @@ export class BarbersController {
     @Param('notificationId') notificationId: string,
     @Body() body: { accept: boolean },
   ) {
-    return this.service.respondInvitation(user.id, notificationId, body.accept);
+    return this.service.respondInvitation(
+      user.id,
+      notificationId,
+      body.accept,
+    );
   }
 
   @Patch(':id/salary')
@@ -286,6 +383,11 @@ export class BarbersController {
     @Body() body: { baseSalary: number },
   ) {
     return this.service.updateBaseSalary(user.id, id, body.baseSalary);
+  }
+
+  @Delete(':id')
+  removeBarber(@CurrentUser() user: UserEntity, @Param('id') id: string) {
+    return this.service.removeBarber(user.id, id);
   }
 
   @Get('me/profile')
@@ -299,7 +401,11 @@ export class BarbersController {
     @Query('year') year: string,
     @Query('month') month: string,
   ) {
-    return this.service.getMonthlyHeatmap(user.id, Number(year), Number(month));
+    return this.service.getMonthlyHeatmap(
+      user.id,
+      Number(year),
+      Number(month),
+    );
   }
 
   @Get('me/timeline')
@@ -328,4 +434,3 @@ export class BarbersController {
   exports: [BarbersService],
 })
 export class BarbersModule {}
-

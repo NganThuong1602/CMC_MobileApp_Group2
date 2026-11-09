@@ -1,13 +1,28 @@
 import '../../core/utils/result.dart';
 import '../entities/social_entities.dart';
+import '../entities/user_entity.dart';
 
 abstract class SocialRepository {
+  Future<Result<UserEntity>> getPublicUserProfile(String userId);
+
   Future<Result<List<PostEntity>>> getFeedPosts({String? authorId});
 
   Future<Result<PostEntity>> createPost({
     required String authorId,
     required String content,
     required List<String> imageUrls,
+  });
+
+  Future<Result<PostEntity>> updatePost({
+    required String postId,
+    required String authorId,
+    required String content,
+    required List<String> imageUrls,
+  });
+
+  Future<Result<void>> deletePost({
+    required String postId,
+    required String authorId,
   });
 
   Future<Result<PostCommentEntity>> addPostComment({
@@ -31,6 +46,8 @@ abstract class SocialRepository {
   });
 
   Future<Result<List<ChatRoomEntity>>> getBarberShopChatRooms(String shopId);
+
+  Future<Result<List<ChatRoomEntity>>> getManagerShopChatRooms(String shopId);
 
   Future<Result<ChatMessageEntity>> sendChatMessage({
     required String roomId,

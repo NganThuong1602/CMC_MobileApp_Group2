@@ -138,6 +138,8 @@ class AppNotificationEntity extends Equatable {
   final bool isRead;
   final String? targetShopId;
   final String? targetBarberId;
+  final String? targetRoomId;
+  final Map<String, dynamic>? payload;
   final DateTime createdAt;
 
   const AppNotificationEntity({
@@ -149,10 +151,15 @@ class AppNotificationEntity extends Equatable {
     this.isRead = false,
     this.targetShopId,
     this.targetBarberId,
+    this.targetRoomId,
+    this.payload,
     required this.createdAt,
   });
 
-  AppNotificationEntity copyWith({bool? isRead}) {
+  AppNotificationEntity copyWith({
+    bool? isRead,
+    Map<String, dynamic>? payload,
+  }) {
     return AppNotificationEntity(
       id: id,
       userId: userId,
@@ -162,11 +169,21 @@ class AppNotificationEntity extends Equatable {
       isRead: isRead ?? this.isRead,
       targetShopId: targetShopId,
       targetBarberId: targetBarberId,
+      targetRoomId: targetRoomId,
+      payload: payload ?? this.payload,
       createdAt: createdAt,
     );
   }
 
   @override
-  List<Object?> get props => [id, userId, title, type, isRead, createdAt];
+  List<Object?> get props => [
+        id,
+        userId,
+        title,
+        type,
+        isRead,
+        targetRoomId,
+        createdAt,
+      ];
 }
 

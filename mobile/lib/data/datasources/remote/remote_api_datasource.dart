@@ -181,6 +181,34 @@ class RemoteApiDataSource {
     return urls;
   }
 
+  /// Tải 1 ảnh đã qua bước căn chỉnh (Crop Bytes) lên NestJS -> Cloudinary.
+  Future<String?> uploadImageBytes(
+    List<int> bytes, {
+    String filename = 'barbersmart_cropped.png',
+  }) async {
+    final formData = FormData.fromMap({
+      'files': [
+        MultipartFile.fromBytes(
+          bytes,
+          filename: filename,
+        ),
+      ],
+    });
+    final res = await apiClient.dio.post(
+      '/upload/images',
+      data: formData,
+      options: Options(
+        contentType: 'multipart/form-data',
+        sendTimeout: const Duration(seconds: 60),
+        receiveTimeout: const Duration(seconds: 60),
+      ),
+    );
+    final map = Map<String, dynamic>.from(res.data as Map);
+    final urls =
+        (map['urls'] as List?)?.map((e) => e.toString()).toList() ?? [];
+    return urls.isNotEmpty ? urls.first : null;
+  }
+
   // ==================== SHOPS & PAYMENTS ====================
   Future<List<ShopModel>> getNearbyShops({
     double? lat,
@@ -284,6 +312,23 @@ class RemoteApiDataSource {
     return ServiceModel.fromJson(Map<String, dynamic>.from(res.data as Map));
   }
 
+  Future<ServiceModel> updateShopService({
+    required String serviceId,
+    required String name,
+    required int price,
+    required int durationMinutes,
+  }) async {
+    final res = await apiClient.dio.patch(
+      '/shops/services/$serviceId',
+      data: {
+        'name': name,
+        'price': price,
+        'durationMinutes': durationMinutes,
+      },
+    );
+    return ServiceModel.fromJson(Map<String, dynamic>.from(res.data as Map));
+  }
+
   Future<void> deleteShopService(String serviceId) async {
     await apiClient.dio.delete('/shops/services/$serviceId');
   }
@@ -332,6 +377,7 @@ class RemoteApiDataSource {
         'content': transferContent,
         'transferAmount': amount,
         'transferType': 'in',
+        'simulated': true,
       },
     );
     final map = Map<String, dynamic>.from(res.data as Map);
@@ -436,11 +482,45 @@ class RemoteApiDataSource {
         .toList();
   }
 
-  Future<void> inviteBarber(String emailOrPhone) async {
+  Future<void> inviteBarber(String emailOrPhone, {int? baseSalary}) async {
     await apiClient.dio.post(
       '/barbers/invite',
-      data: {'emailOrPhone': emailOrPhone},
+      data: {
+        'emailOrPhone': emailOrPhone,
+        if (baseSalary != null) 'baseSalary': baseSalary,
+      },
     );
+  }
+
+  Future<void> removeBarber(String barberId) async {
+    await apiClient.dio.delete('/barbers/$barberId');
+  }
+
+  Future<List<ShopModel>> getAdminPendingShops() async {
+    final res = await apiClient.dio.get('/shops/admin/pending');
+    final list = res.data as List;
+    return list
+        .whereType<Map>()
+        .map((m) => ShopModel.fromJson(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<List<ShopModel>> getAdminActiveShops() async {
+    final res = await apiClient.dio.get('/shops/admin/all');
+    final list = res.data as List;
+    return list
+        .whereType<Map>()
+        .map((m) => ShopModel.fromJson(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<ShopModel> approveShopByAdmin(String shopId) async {
+    final res = await apiClient.dio.patch('/shops/$shopId/approve');
+    return ShopModel.fromJson(Map<String, dynamic>.from(res.data as Map));
+  }
+
+  Future<void> deleteShopByAdmin(String shopId) async {
+    await apiClient.dio.delete('/shops/$shopId/admin');
   }
 
   Future<void> respondBarberInvitation(
@@ -461,6 +541,11 @@ class RemoteApiDataSource {
   }
 
   // ==================== SOCIAL / COMMUNITY / NOTIFICATIONS ====================
+  Future<UserModel> getPublicUserProfile(String userId) async {
+    final res = await apiClient.dio.get('/users/$userId/public-profile');
+    return UserModel.fromJson(Map<String, dynamic>.from(res.data as Map));
+  }
+
   Future<List<PostModel>> getFeedPosts({String? authorId}) async {
     final res = await apiClient.dio.get(
       authorId == null ? '/posts' : '/posts/user/$authorId',
@@ -484,6 +569,25 @@ class RemoteApiDataSource {
       },
     );
     return PostModel.fromJson(Map<String, dynamic>.from(res.data as Map));
+  }
+
+  Future<PostModel> updatePost({
+    required String postId,
+    required String caption,
+    required List<String> imageUrls,
+  }) async {
+    final res = await apiClient.dio.patch(
+      '/posts/$postId',
+      data: {
+        'caption': caption,
+        'imageUrls': imageUrls,
+      },
+    );
+    return PostModel.fromJson(Map<String, dynamic>.from(res.data as Map));
+  }
+
+  Future<void> deletePost(String postId) async {
+    await apiClient.dio.delete('/posts/$postId');
   }
 
   Future<PostCommentModel> addPostComment({
@@ -543,6 +647,15 @@ class RemoteApiDataSource {
         .toList();
   }
 
+  Future<List<Map<String, dynamic>>> getManagerChatRooms() async {
+    final res = await apiClient.dio.get('/chat/manager/rooms');
+    final list = res.data as List;
+    return list
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .toList();
+  }
+
   Future<List<Map<String, dynamic>>> getRoomMessages(String roomId) async {
     final res = await apiClient.dio.get('/chat/rooms/$roomId/messages');
     final list = res.data as List;
@@ -552,12 +665,30 @@ class RemoteApiDataSource {
         .toList();
   }
 
+  Future<Map<String, dynamic>> sendChatMessageRest({
+    required String roomId,
+    required String content,
+  }) async {
+    final res = await apiClient.dio.post(
+      '/chat/rooms/$roomId/messages',
+      data: {'content': content},
+    );
+    return Map<String, dynamic>.from(res.data as Map);
+  }
+
   Future<List<AppNotificationModel>> getMyNotifications() async {
     final res = await apiClient.dio.get('/notifications');
-    final list = res.data as List;
-    return list
+    final rawList = (res.data is Map
+            ? (res.data as Map)['items']
+            : res.data) as List? ??
+        const [];
+    return rawList
         .whereType<Map>()
         .map((m) => AppNotificationModel.fromJson(Map<String, dynamic>.from(m)))
         .toList();
+  }
+
+  Future<void> markNotificationRead(String notificationId) async {
+    await apiClient.dio.patch('/notifications/$notificationId/read');
   }
 }

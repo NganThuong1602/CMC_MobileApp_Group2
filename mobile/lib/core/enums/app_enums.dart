@@ -1,7 +1,8 @@
 enum UserRole {
   user('Khách hàng'),
-  manager('Quản lý'),
-  barber('Barber');
+  manager('Quản lý quán'),
+  barber('Barber'),
+  admin('Admin');
 
   final String label;
   const UserRole(this.label);
@@ -12,6 +13,8 @@ enum UserRole {
         return UserRole.manager;
       case 'BARBER':
         return UserRole.barber;
+      case 'ADMIN':
+        return UserRole.admin;
       default:
         return UserRole.user;
     }
@@ -28,7 +31,7 @@ enum Gender {
 }
 
 enum BookingStatus {
-  pending('Chờ thanh toán QR'),
+  pending('Chờ thanh toán'),
   confirmed('Đã đặt lịch'),
   completed('Hoàn thành'),
   cancelled('Đã hủy');
@@ -39,49 +42,30 @@ enum BookingStatus {
 
 enum PaymentMethod {
   atShop('Thanh toán tại quán'),
-  qrCode('Thanh toán bằng QR (SePay)');
+  qrCode('Thanh toán bằng QR Code');
 
   final String label;
   const PaymentMethod(this.label);
 }
 
 enum HighlightPackageType {
-  oneHour(
-    apiCode: 'ONE_HOUR',
-    label: 'Gói 1 giờ',
-    priceVnd: 20000,
-    duration: Duration(hours: 1),
-  ),
-  oneDay(
-    apiCode: 'ONE_DAY',
-    label: 'Gói 1 ngày',
-    priceVnd: 50000,
-    duration: Duration(days: 1),
-  ),
-  threeDays(
-    apiCode: 'THREE_DAYS',
-    label: 'Gói 3 ngày',
-    priceVnd: 90000,
-    duration: Duration(days: 3),
-  );
+  oneHour('1 Giờ', 20000, Duration(hours: 1)),
+  oneDay('1 Ngày', 50000, Duration(days: 1)),
+  threeDays('3 Ngày', 90000, Duration(days: 3));
 
-  final String apiCode;
   final String label;
-  final int priceVnd;
+  final int price;
   final Duration duration;
+  const HighlightPackageType(this.label, this.price, this.duration);
 
-  const HighlightPackageType({
-    required this.apiCode,
-    required this.label,
-    required this.priceVnd,
-    required this.duration,
-  });
+  int get priceVnd => price;
 }
 
 enum NotificationType {
   bookingCreated,
-  barberInvitation,
   paymentConfirmed,
+  barberInvitation,
+  chatMessage,
+  shopApproval,
   system,
 }
-

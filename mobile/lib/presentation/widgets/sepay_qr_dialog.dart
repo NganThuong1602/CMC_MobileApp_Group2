@@ -10,7 +10,7 @@ import '../../domain/repositories/shop_repository.dart';
 
 /// Dialog hiển thị mã VietQR động tích hợp SePay Webhook + Socket.IO Realtime:
 /// - Tự động đóng và trả về `true` ngay lập tức khi nhận sự kiện Socket.IO `payment.success`.
-/// - Không cần chờ Admin hay chủ quán duyệt tay!
+/// - Toàn bộ màu sắc & kiểu chữ kế thừa tự động từ [AppTheme].
 class SepayQrDialog extends StatefulWidget {
   final String title;
   final PaymentTransactionEntity transaction;
@@ -71,10 +71,22 @@ class _SepayQrDialogState extends State<SepayQrDialog> {
     }
   }
 
+  String get _resolvedQrImageUrl {
+    final raw = widget.transaction.qrImageUrl.trim();
+    if (raw.isNotEmpty && !raw.contains('img.vietqr.io')) {
+      return raw;
+    }
+    final encodedDes = Uri.encodeComponent(widget.transaction.transferContent);
+    return 'https://qr.sepay.vn/img?bank=${AppConstants.sepayBankCode}&acc=${AppConstants.platformBankAccount}&template=compact&amount=${widget.transaction.amount}&des=$encodedDes';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final ts = context.appTextStyles;
+
     return Dialog(
-      backgroundColor: AppTheme.surfaceWhite,
+      backgroundColor: cs.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -86,23 +98,19 @@ class _SepayQrDialogState extends State<SepayQrDialog> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryGreenLight,
+                    color: cs.primaryContainer,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.qr_code_scanner_rounded,
-                    color: AppTheme.primaryGreen,
+                    color: cs.primary,
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     widget.title,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.textPrimary,
-                    ),
+                    style: ts.dialogTitle,
                   ),
                 ),
                 IconButton(
@@ -115,38 +123,35 @@ class _SepayQrDialogState extends State<SepayQrDialog> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppTheme.scaffoldBg,
+                color: cs.surfaceContainerLow,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE0E6ED)),
+                border: Border.all(color: cs.outline),
               ),
               child: Column(
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Image.network(
-                      widget.transaction.qrImageUrl,
+                      _resolvedQrImageUrl,
                       height: 220,
                       width: 220,
                       fit: BoxFit.contain,
                       errorBuilder: (_, __, ___) => Container(
                         height: 200,
                         width: 200,
-                        color: Colors.white,
+                        color: cs.surface,
                         alignment: Alignment.center,
-                        child: const Column(
+                        child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(
                               Icons.qr_code_2_rounded,
                               size: 110,
-                              color: AppTheme.primaryGreen,
+                              color: cs.primary,
                             ),
                             Text(
                               'VietQR SePay Dynamic',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
+                              style: ts.captionStrong,
                             ),
                           ],
                         ),
@@ -156,19 +161,12 @@ class _SepayQrDialogState extends State<SepayQrDialog> {
                   const SizedBox(height: 10),
                   Text(
                     AppFormatters.formatVnd(widget.transaction.amount),
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.primaryGreen,
-                    ),
+                    style: ts.priceLargePrimary,
                   ),
                   const SizedBox(height: 4),
-                  const Text(
+                  Text(
                     '${AppConstants.platformBankName} • ${AppConstants.platformBankAccount}',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      color: AppTheme.textSecondary,
-                    ),
+                    style: ts.bodySmallMuted,
                   ),
                   const SizedBox(height: 6),
                   Container(
@@ -177,23 +175,19 @@ class _SepayQrDialogState extends State<SepayQrDialog> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryGreenLight,
+                      color: cs.primaryContainer,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       'Nội dung CK: ${widget.transaction.transferContent}',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.primaryGreen,
-                      ),
+                      style: ts.bodySmallPrimary,
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 12),
-            const Row(
+            Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 SizedBox(
@@ -201,17 +195,14 @@ class _SepayQrDialogState extends State<SepayQrDialog> {
                   height: 14,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: AppTheme.primaryGreen,
+                    color: cs.primary,
                   ),
                 ),
-                SizedBox(width: 8),
+                const SizedBox(width: 8),
                 Flexible(
                   child: Text(
                     'Đang lắng nghe SePay Webhook qua Socket.IO...',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textSecondary,
-                    ),
+                    style: ts.captionMuted,
                   ),
                 ),
               ],
@@ -235,4 +226,3 @@ class _SepayQrDialogState extends State<SepayQrDialog> {
     );
   }
 }
-

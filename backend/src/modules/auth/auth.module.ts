@@ -43,6 +43,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   MinLength,
 } from 'class-validator';
 import { ExtractJwt, Strategy } from 'passport-jwt';
@@ -60,6 +61,9 @@ import {
 } from '../../database/entities';
 import { MailerService } from '../mailer/mailer.module';
 
+export const VN_PHONE_REGEX =
+  /^(032|033|034|035|036|037|038|039|086|096|097|098|081|082|083|084|085|088|091|094|070|076|077|078|079|089|090|093)\d{7}$/;
+
 // ==================== DTOs ====================
 export class RegisterRequestOtpDto {
   @IsString()
@@ -70,7 +74,7 @@ export class RegisterRequestOtpDto {
   email!: string;
 
   @IsString()
-  @MinLength(9, { message: 'Số điện thoại không hợp lệ' })
+  @Matches(VN_PHONE_REGEX, { message: 'số điện thoại không đúng' })
   phone!: string;
 
   @IsString()
@@ -209,6 +213,9 @@ export class AuthService {
 
     const email = dto.email.trim().toLowerCase();
     const phone = dto.phone.trim();
+    if (!VN_PHONE_REGEX.test(phone)) {
+      throw new BadRequestException('số điện thoại không đúng');
+    }
 
     const existingEmail = await this.userRepo.findOne({ where: { email } });
     if (existingEmail) {

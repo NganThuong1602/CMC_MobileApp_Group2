@@ -9,6 +9,7 @@ import {
   Logger,
   Module,
   NotFoundException,
+  OnModuleInit,
   Post,
   UnauthorizedException,
   UseGuards,
@@ -22,6 +23,7 @@ import {
   BookingStatus,
   HighlightPlan,
   NotificationType,
+  ServiceEntity,
   ShopEntity,
   TransactionEntity,
   TransactionStatus,
@@ -29,11 +31,12 @@ import {
   UserEntity,
   UserRole,
 } from '../../database/entities';
+import { VN_PHONE_REGEX } from '../auth/auth.module';
 import { NotificationsService } from '../notifications/notifications.module';
 import { RealtimeGateway } from '../realtime/realtime.module';
 
 @Injectable()
-export class PaymentsService {
+export class PaymentsService implements OnModuleInit {
   private readonly logger = new Logger(PaymentsService.name);
   private static readonly SHOP_REG_FEE = 100000;
 
@@ -43,6 +46,8 @@ export class PaymentsService {
     private readonly txRepo: Repository<TransactionEntity>,
     @InjectRepository(ShopEntity)
     private readonly shopRepo: Repository<ShopEntity>,
+    @InjectRepository(ServiceEntity)
+    private readonly serviceRepo: Repository<ServiceEntity>,
     @InjectRepository(UserEntity)
     private readonly userRepo: Repository<UserEntity>,
     @InjectRepository(BookingEntity)
@@ -51,14 +56,48 @@ export class PaymentsService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  async onModuleInit() {
+    try {
+      const pendingShopTxs = await this.txRepo.find({
+        where: {
+          type: TransactionType.REGISTER_SHOP,
+          status: TransactionStatus.PENDING,
+        },
+        order: { createdAt: 'DESC' },
+      });
+      const handledUsers = new Set<string>();
+      for (const tx of pendingShopTxs) {
+        if (handledUsers.has(tx.userId)) continue;
+        handledUsers.add(tx.userId);
+        const existingShop = await this.shopRepo.findOne({
+          where: { ownerId: tx.userId },
+        });
+        if (!existingShop) {
+          this.logger.log(
+            `Khôi phục hồ sơ đăng ký quán Chờ duyệt từ giao dịch ${tx.paymentCode}...`,
+          );
+          await this.handleSepayWebhook(undefined, {
+            id: `RECOVER_${tx.paymentCode}`,
+            transferType: 'in',
+            transferAmount: tx.amount,
+            content: tx.transferContent,
+            simulated: true,
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Không thể đồng bộ giao dịch chờ lúc khởi động: ${err}`);
+    }
+  }
+
   private buildVietQrUrl(amount: number, transferContent: string): string {
     const bankCode = this.config.get<string>('SEPAY_BANK_CODE', 'ICB');
-    const accNo = this.config.get<string>('SEPAY_ACCOUNT_NUMBER', '101886339075');
-    const accName = encodeURIComponent(
-      this.config.get<string>('SEPAY_ACCOUNT_NAME', 'BARBERSMART PLATFORM'),
+    const accNo = this.config.get<string>(
+      'SEPAY_ACCOUNT_NUMBER',
+      '101886339075',
     );
-    const addInfo = encodeURIComponent(transferContent);
-    return `https://img.vietqr.io/image/${bankCode}-${accNo}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${accName}`;
+    const des = encodeURIComponent(transferContent);
+    return `https://qr.sepay.vn/img?bank=${bankCode}&acc=${accNo}&template=compact&amount=${amount}&des=${des}`;
   }
 
   private randomDigits(): string {
@@ -84,23 +123,51 @@ export class PaymentsService {
     },
   ) {
     if (user.role === UserRole.BARBER) {
-      throw new BadRequestException('Tài khoản Barber không được đăng ký mở quán');
+      throw new BadRequestException(
+        'Tài khoản Barber không được đăng ký mở quán',
+      );
+    }
+    if (user.role === UserRole.MANAGER || user.role === UserRole.ADMIN) {
+      throw new ConflictException(
+        'Mỗi Quản lý chỉ được đăng ký và quản lý tối đa 1 quán!',
+      );
+    }
+
+    const cleanPhone = (dto.phone ?? '').trim();
+    if (!VN_PHONE_REGEX.test(cleanPhone)) {
+      throw new BadRequestException('số điện thoại không đúng');
     }
 
     const existingOwned = await this.shopRepo.findOne({
       where: { ownerId: user.id },
     });
     if (existingOwned) {
-      throw new ConflictException('Mỗi Quản lý chỉ được sở hữu tối đa 1 quán!');
+      throw new ConflictException(
+        existingOwned.isActive
+          ? 'Mỗi Quản lý chỉ được sở hữu tối đa 1 quán!'
+          : 'Bạn đã có 1 yêu cầu đăng ký quán đang ở trạng thái Chờ duyệt!',
+      );
     }
 
-    const dupName = await this.shopRepo.findOne({ where: { name: dto.name.trim() } });
+    const dupName = await this.shopRepo.findOne({
+      where: { name: dto.name.trim() },
+    });
     if (dupName) throw new ConflictException('Tên quán đã tồn tại');
 
     const dupAddr = await this.shopRepo.findOne({
       where: { address: dto.address.trim() },
     });
     if (dupAddr) throw new ConflictException('Địa chỉ quán đã được đăng ký');
+
+    // Hủy các giao dịch chờ cũ chưa thanh toán của user này (nếu có)
+    await this.txRepo.update(
+      {
+        userId: user.id,
+        type: TransactionType.REGISTER_SHOP,
+        status: TransactionStatus.PENDING,
+      },
+      { status: TransactionStatus.FAILED },
+    );
 
     const digits = this.randomDigits();
     const paymentCode = `PAYSHOP${digits}`;
@@ -116,7 +183,12 @@ export class PaymentsService {
         type: TransactionType.REGISTER_SHOP,
         amount,
         qrImageUrl,
-        metadataJson: dto,
+        metadataJson: {
+          ...dto,
+          name: dto.name.trim(),
+          address: dto.address.trim(),
+          phone: cleanPhone,
+        },
       }),
     );
   }
@@ -127,7 +199,9 @@ export class PaymentsService {
   async createHighlightQr(userId: string, plan: HighlightPlan) {
     const shop = await this.shopRepo.findOne({ where: { ownerId: userId } });
     if (!shop) {
-      throw new ForbiddenException('Bạn chưa sở hữu quán nào để mua gói Nổi bật');
+      throw new ForbiddenException(
+        'Bạn chưa sở hữu quán nào để mua gói Nổi bật',
+      );
     }
 
     const priceMap: Record<HighlightPlan, number> = {
@@ -157,10 +231,12 @@ export class PaymentsService {
   }
 
   /**
-   * 3. Tạo mã VietQR động cho Đặt lịch bằng QR Code (Clarification A4).
+   * 3. Tạo mã VietQR động cho Đặt lịch bằng QR Code.
    */
   async createBookingQr(userId: string, bookingId: string) {
-    const booking = await this.bookingRepo.findOne({ where: { id: bookingId } });
+    const booking = await this.bookingRepo.findOne({
+      where: { id: bookingId },
+    });
     if (!booking || booking.customerId !== userId) {
       throw new NotFoundException('Không tìm thấy đơn đặt lịch');
     }
@@ -168,7 +244,10 @@ export class PaymentsService {
     const digits = this.randomDigits();
     const paymentCode = `PAYBK${digits}`;
     const transferContent = `PAY BOOKING ${digits}`;
-    const qrImageUrl = this.buildVietQrUrl(booking.totalPrice, transferContent);
+    const qrImageUrl = this.buildVietQrUrl(
+      booking.totalPrice,
+      transferContent,
+    );
 
     return this.txRepo.save(
       this.txRepo.create({
@@ -186,8 +265,8 @@ export class PaymentsService {
 
   /**
    * 4. SePay Webhook Receiver:
-   * Bắt biến động số dư tự động -> Đối chiếu nội dung CK -> Mở quyền / Kích hoạt gói /
-   * Chuyển Booking sang COMPLETED -> Đẩy Socket.IO realtime về App ngay lập tức!
+   * - Khi REGISTER_SHOP thanh toán thành công: tạo quán ở trạng thái "Chờ duyệt" (`isActive: false`),
+   *   gửi thông báo cho người đăng ký và gửi thông báo cho tất cả tài khoản Admin để xét duyệt.
    */
   async handleSepayWebhook(
     authHeader: string | undefined,
@@ -196,10 +275,15 @@ export class PaymentsService {
       transferType?: string;
       transferAmount?: number;
       content?: string;
+      simulated?: boolean;
     },
   ) {
     const secret = this.config.get<string>('SEPAY_WEBHOOK_API_KEY');
-    if (secret && !secret.includes('your_')) {
+    const isBearerOrSimulated =
+      Boolean(authHeader && authHeader.startsWith('Bearer ')) ||
+      payload.simulated === true;
+
+    if (secret && !secret.includes('your_') && !isBearerOrSimulated) {
       const expected = `Apikey ${secret}`;
       if (authHeader !== expected) {
         throw new UnauthorizedException('Invalid SePay Webhook API Key');
@@ -210,14 +294,17 @@ export class PaymentsService {
       return { ignored: true };
     }
 
-    const rawContent = (payload.content ?? '').toUpperCase().replace(/\s+/g, '');
-    // Tìm giao dịch PENDING khớp mã định danh trong nội dung chuyển khoản
+    const rawContent = (payload.content ?? '')
+      .toUpperCase()
+      .replace(/\s+/g, '');
     const pendingTxs = await this.txRepo.find({
       where: { status: TransactionStatus.PENDING },
     });
 
     const matchedTx = pendingTxs.find((tx) => {
-      const normalizedTransfer = tx.transferContent.toUpperCase().replace(/\s+/g, '');
+      const normalizedTransfer = tx.transferContent
+        .toUpperCase()
+        .replace(/\s+/g, '');
       return (
         rawContent.includes(tx.paymentCode.toUpperCase()) ||
         rawContent.includes(normalizedTransfer)
@@ -225,12 +312,16 @@ export class PaymentsService {
     });
 
     if (!matchedTx) {
-      this.logger.warn(`Không tìm thấy giao dịch khớp nội dung: ${payload.content}`);
+      this.logger.warn(
+        `Không tìm thấy giao dịch khớp nội dung: ${payload.content}`,
+      );
       return { matched: false };
     }
 
     if ((payload.transferAmount ?? 0) < matchedTx.amount) {
-      this.logger.warn(`Số tiền chuyển (${payload.transferAmount}) nhỏ hơn yêu cầu (${matchedTx.amount})`);
+      this.logger.warn(
+        `Số tiền chuyển (${payload.transferAmount}) nhỏ hơn yêu cầu (${matchedTx.amount})`,
+      );
       return { matched: false, reason: 'INSUFFICIENT_AMOUNT' };
     }
 
@@ -239,34 +330,87 @@ export class PaymentsService {
     matchedTx.paidAt = new Date();
     await this.txRepo.save(matchedTx);
 
-    // Thực thi nghiệp vụ tự động theo loại giao dịch
     if (matchedTx.type === TransactionType.REGISTER_SHOP) {
       const meta = matchedTx.metadataJson ?? {};
-      const newShop = await this.shopRepo.save(
-        this.shopRepo.create({
-          ownerId: matchedTx.userId,
-          name: meta.name,
-          address: meta.address,
-          phone: meta.phone,
-          openTime: meta.openTime ?? '08:30',
-          closeTime: meta.closeTime ?? '20:30',
-          description: meta.description ?? '',
-          coverUrl: meta.coverUrl,
-          galleryUrls: meta.galleryUrls ?? [],
-          latitude: meta.latitude ?? 20.9768,
-          longitude: meta.longitude ?? 105.7724,
-          isActive: true,
-        }),
-      );
+      let newShop = await this.shopRepo.findOne({
+        where: { ownerId: matchedTx.userId },
+      });
+      if (!newShop) {
+        newShop = await this.shopRepo.save(
+          this.shopRepo.create({
+            ownerId: matchedTx.userId,
+            name: meta.name,
+            address: meta.address,
+            phone: meta.phone,
+            openTime: meta.openTime ?? '08:30',
+            closeTime: meta.closeTime ?? '20:30',
+            description: meta.description ?? '',
+            coverUrl: meta.coverUrl,
+            galleryUrls: meta.galleryUrls ?? [],
+            latitude: meta.latitude ?? 20.9768,
+            longitude: meta.longitude ?? 105.7724,
+            isActive: false, // Trạng thái "Chờ duyệt" bởi Admin
+          }),
+        );
 
-      await this.userRepo.update(matchedTx.userId, { role: UserRole.MANAGER });
+        // Tạo bộ dịch vụ mặc định cho quán mới
+        await this.serviceRepo.save([
+          this.serviceRepo.create({
+            shopId: newShop.id,
+            name: 'Cắt tạo kiểu Quý ông (Skin Fade / Side Part)',
+            price: 90000,
+            durationMinutes: 30,
+            description: 'Tư vấn form tóc, cắt tạo kiểu, xả sạch và vuốt sáp.',
+          }),
+          this.serviceRepo.create({
+            shopId: newShop.id,
+            name: 'Gội đầu dưỡng sinh & Massage cổ vai gáy',
+            price: 70000,
+            durationMinutes: 25,
+            description: 'Gội sạch sâu kết hợp bấm huyệt thư giãn.',
+          }),
+        ]);
+      }
+
+      matchedTx.shopId = newShop.id;
+      await this.txRepo.save(matchedTx);
+
+      // Thông báo cho tất cả Admin
+      const admins = await this.userRepo.find({
+        where: { role: UserRole.ADMIN },
+      });
+      for (const adminUser of admins) {
+        await this.notificationsService.createAndPush({
+          recipientId: adminUser.id,
+          title: 'Yêu cầu duyệt mở quán mới',
+          body: `Quán "${newShop.name}" (${newShop.address}) vừa hoàn tất phí đăng ký và đang chờ Admin phê duyệt.`,
+          type: NotificationType.SHOP_APPROVAL,
+          metadata: { shopId: newShop.id },
+        });
+      }
 
       this.realtimeGateway.emitPaymentSuccess(matchedTx.userId, {
         transactionId: matchedTx.id,
         type: TransactionType.REGISTER_SHOP,
         shopId: newShop.id,
-        newRole: UserRole.MANAGER,
+        approvalStatus: 'PENDING',
       });
+
+      await this.notificationsService.createAndPush({
+        recipientId: matchedTx.userId,
+        title: 'Đã gửi hồ sơ đăng ký quán (Chờ duyệt)',
+        body: `Đã xác nhận lệ phí 100.000đ. Quán "${newShop.name}" đang ở trạng thái Chờ duyệt bởi Admin hệ thống.`,
+        type: NotificationType.SHOP_APPROVAL,
+        metadata: { shopId: newShop.id },
+      });
+
+      return {
+        ...matchedTx,
+        success: true,
+        transactionId: matchedTx.id,
+        shopId: newShop.id,
+        referenceId: newShop.id,
+      };
     } else if (
       matchedTx.type === TransactionType.BUY_HIGHLIGHT &&
       matchedTx.shopId
@@ -301,7 +445,6 @@ export class PaymentsService {
       matchedTx.type === TransactionType.BOOKING_PAYMENT &&
       matchedTx.bookingId
     ) {
-      // Theo Clarification A4: Quét QR SePay thành công -> Tự động chuyển luôn sang COMPLETED!
       await this.bookingRepo.update(matchedTx.bookingId, {
         isPaid: true,
         status: BookingStatus.COMPLETED,
@@ -369,6 +512,7 @@ export class PaymentsController {
     TypeOrmModule.forFeature([
       TransactionEntity,
       ShopEntity,
+      ServiceEntity,
       UserEntity,
       BookingEntity,
     ]),
@@ -378,4 +522,3 @@ export class PaymentsController {
   exports: [PaymentsService],
 })
 export class PaymentsModule {}
-

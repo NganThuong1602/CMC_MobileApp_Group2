@@ -71,9 +71,24 @@ class AuthState extends Equatable {
 
 class AuthCubit extends Cubit<AuthState> {
   final AuthRepository authRepository;
-  final ValueNotifier<UserEntity?> authListenable = ValueNotifier(null);
+  final ValueNotifier<UserEntity?> authListenable;
 
-  AuthCubit({required this.authRepository}) : super(const AuthState());
+  AuthCubit({
+    required this.authRepository,
+    UserEntity? initialUser,
+  })  : authListenable = ValueNotifier(initialUser),
+        super(
+          initialUser != null
+              ? AuthState(
+                  status: AuthStatus.authenticated,
+                  user: initialUser,
+                )
+              : const AuthState(),
+        ) {
+    if (initialUser != null) {
+      refreshCurrentUser();
+    }
+  }
 
   Future<void> login({
     required String email,

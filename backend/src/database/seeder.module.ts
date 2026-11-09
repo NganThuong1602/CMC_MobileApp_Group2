@@ -65,7 +65,7 @@ const VAN_PHUC_SHOPS_SEED: SeedShopSpec[] = [
       'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=1000&q=80',
     shopName: 'Vạn Phúc Barber House',
     address: 'Số 48 Phố Lụa, Phường Vạn Phúc, Quận Hà Đông, Hà Nội',
-    phone: '0901 888 234',
+    phone: '0901888234',
     openTime: '08:00',
     closeTime: '21:30',
     latitude: 20.9768,
@@ -147,7 +147,7 @@ const VAN_PHUC_SHOPS_SEED: SeedShopSpec[] = [
       'https://images.unsplash.com/photo-1521590832167-7bcbfaa6381f?w=1000&q=80',
     shopName: 'The Gentlemen Hair Salon Hà Đông',
     address: 'Số 126 Tố Hữu, Phường Vạn Phúc, Quận Hà Đông, Hà Nội',
-    phone: '0902 888 111',
+    phone: '0902888111',
     openTime: '08:30',
     closeTime: '21:00',
     latitude: 20.9785,
@@ -228,7 +228,7 @@ const VAN_PHUC_SHOPS_SEED: SeedShopSpec[] = [
       'https://images.unsplash.com/photo-1622286342621-4bd786c2447c?w=1000&q=80',
     shopName: '30Shine Studio Vạn Phúc',
     address: 'Số 82 Đường Vạn Phúc, Phường Vạn Phúc, Quận Hà Đông, Hà Nội',
-    phone: '0903 888 222',
+    phone: '0903888222',
     openTime: '08:00',
     closeTime: '22:00',
     latitude: 20.9749,
@@ -309,7 +309,7 @@ const VAN_PHUC_SHOPS_SEED: SeedShopSpec[] = [
       'https://images.unsplash.com/photo-1599351431202-1e0f0137899a?w=1000&q=80',
     shopName: 'Liem Barber Shop Hà Đông',
     address: 'Số 19 Nguyễn Thanh Bình, Phường Vạn Phúc, Quận Hà Đông, Hà Nội',
-    phone: '0904 888 333',
+    phone: '0904888333',
     openTime: '09:00',
     closeTime: '21:00',
     latitude: 20.9776,
@@ -388,7 +388,7 @@ const VAN_PHUC_SHOPS_SEED: SeedShopSpec[] = [
       'https://images.unsplash.com/photo-1622286342621-4bd786c2447c?w=1000&q=80',
     shopName: 'Classic Fade Club Vạn Phúc',
     address: 'Số 35 Ngô Thì Nhậm, Giáp Vạn Phúc, Quận Hà Đông, Hà Nội',
-    phone: '0905 888 444',
+    phone: '0905888444',
     openTime: '08:30',
     closeTime: '20:30',
     latitude: 20.9734,
@@ -553,7 +553,19 @@ export class DatabaseSeederService implements OnModuleInit {
       { avatarUrl: DEFAULT_AVATAR_URL },
     );
 
-    // 2. Tạo tài khoản Khách hàng mẫu
+    // 2. Tạo tài khoản Admin hệ thống & Khách hàng mẫu
+    await this.upsertUser({
+      email: 'admin@barbersmart.vn',
+      phone: '0900999999',
+      fullName: 'Quản Trị Viên Hệ Thống',
+      role: UserRole.ADMIN,
+      passwordHash: defaultPasswordHash,
+      avatarUrl:
+        'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=400&q=80',
+      coverUrl:
+        'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=1000&q=80',
+    });
+
     const customerMain = await this.upsertUser({
       email: 'user@barbersmart.vn',
       phone: '0988111222',
@@ -788,6 +800,50 @@ export class DatabaseSeederService implements OnModuleInit {
           ],
         }),
       ]);
+    }
+
+    const mainManager = await this.userRepo.findOne({
+      where: { email: 'manager@barbersmart.vn' },
+    });
+    if (mainManager) {
+      const mgrPostCount = await this.postRepo.count({
+        where: { authorId: mainManager.id },
+      });
+      if (mgrPostCount === 0) {
+        await this.postRepo.save(
+          this.postRepo.create({
+            authorId: mainManager.id,
+            caption:
+              'Không gian Vạn Phúc Barber House hôm nay đã sẵn sàng đón anh em Hà Đông ghé trải nghiệm Combo Đế Vương 7 Bước!',
+            imageUrls: [
+              'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=900&q=80',
+              'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=900&q=80',
+            ],
+          }),
+        );
+      }
+    }
+
+    const mainBarber = await this.userRepo.findOne({
+      where: { email: 'barber@barbersmart.vn' },
+    });
+    if (mainBarber) {
+      const barberPostCount = await this.postRepo.count({
+        where: { authorId: mainBarber.id },
+      });
+      if (barberPostCount === 0) {
+        await this.postRepo.save(
+          this.postRepo.create({
+            authorId: mainBarber.id,
+            caption:
+              'Tác phẩm Skin Fade & Pompadour vừa hoàn thiện cho khách quen sáng nay tại Vạn Phúc Barber House.',
+            imageUrls: [
+              'https://images.unsplash.com/photo-1621605815971-fbc98d665033?w=800&q=80',
+              'https://images.unsplash.com/photo-1622286342621-4bd786c2447c?w=800&q=80',
+            ],
+          }),
+        );
+      }
     }
 
     this.logger.log(

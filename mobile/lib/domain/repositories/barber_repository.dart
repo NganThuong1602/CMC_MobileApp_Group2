@@ -27,6 +27,10 @@ abstract class BarberRepository {
     required int baseSalary,
   });
 
+  Future<Result<void>> removeBarberFromShop({
+    required String barberId,
+  });
+
   Future<Result<List<MonthlyBookingHeatDay>>> getMonthlyHeatmap({
     required String barberId,
     required int year,

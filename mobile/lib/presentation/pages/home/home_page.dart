@@ -48,13 +48,15 @@ class _HomePageState extends State<HomePage> {
     final cubit = context.read<ShopDiscoveryCubit>();
     if (cubit.state.locationPermissionAsked) return;
     final userId = context.read<AuthCubit>().state.user?.id;
-    // Gọi trực tiếp Geolocator để bật popup xin quyền GPS thực tế của hệ điều hành / trình duyệt
     await cubit.requestRealDeviceLocation(userId: userId);
   }
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
     final user = context.watch<AuthCubit>().state.user;
+
     return BlocConsumer<ShopDiscoveryCubit, ShopDiscoveryState>(
       listenWhen: (prev, curr) =>
           prev.filterResetRevision != curr.filterResetRevision,
@@ -79,7 +81,7 @@ class _HomePageState extends State<HomePage> {
               onProfileSocialTap: () => context.push('/profile-social'),
             ),
             Container(
-              color: AppTheme.surfaceWhite,
+              color: cs.surface,
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -99,9 +101,9 @@ class _HomePageState extends State<HomePage> {
                             },
                             decoration: InputDecoration(
                               hintText: 'Tìm kiếm tiệm cắt tóc...',
-                              prefixIcon: const Icon(
+                              prefixIcon: Icon(
                                 Icons.search_rounded,
-                                color: AppTheme.textSecondary,
+                                color: cs.onSurfaceVariant,
                                 size: 20,
                               ),
                               suffixIcon: _searchCtrl.text.isNotEmpty
@@ -138,15 +140,15 @@ class _HomePageState extends State<HomePage> {
                             height: 44,
                             decoration: BoxDecoration(
                               color: state.hasRealDeviceGps
-                                  ? AppTheme.primaryGreen
-                                  : AppTheme.primaryGreenLight,
+                                  ? cs.primary
+                                  : cs.primaryContainer,
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Icon(
                               Icons.my_location_rounded,
                               color: state.hasRealDeviceGps
-                                  ? Colors.white
-                                  : AppTheme.primaryGreen,
+                                  ? cs.onPrimary
+                                  : cs.primary,
                               size: 20,
                             ),
                           ),
@@ -166,15 +168,15 @@ class _HomePageState extends State<HomePage> {
                             height: 44,
                             decoration: BoxDecoration(
                               color: state.hasActiveFilter
-                                  ? AppTheme.primaryGreen
-                                  : AppTheme.primaryGreenLight,
+                                  ? cs.primary
+                                  : cs.primaryContainer,
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Icon(
                               Icons.tune_rounded,
                               color: state.hasActiveFilter
-                                  ? Colors.white
-                                  : AppTheme.primaryGreen,
+                                  ? cs.onPrimary
+                                  : cs.primary,
                               size: 21,
                             ),
                           ),
@@ -191,28 +193,26 @@ class _HomePageState extends State<HomePage> {
                       children: [
                         if (state.minRatingFilter != null)
                           _buildActiveFilterPill(
+                            context,
                             'Từ ${state.minRatingFilter!.toStringAsFixed(1)} ⭐',
                           ),
                         if (state.maxDistanceKmFilter != null)
                           _buildActiveFilterPill(
+                            context,
                             '0 – ${state.maxDistanceKmFilter!.round()} km',
                           ),
                         InkWell(
                           onTap: () => context
                               .read<ShopDiscoveryCubit>()
                               .clearFilters(userId: user?.id),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
                               horizontal: 4,
                               vertical: 2,
                             ),
                             child: Text(
                               'Xoá lọc',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.dangerRed,
-                              ),
+                              style: tt.bodySmallDanger,
                             ),
                           ),
                         ),
@@ -225,25 +225,21 @@ class _HomePageState extends State<HomePage> {
             Expanded(
               child: state.isLoading && state.nearbyShops.isEmpty
                   ? const Center(
-                      child: CircularProgressIndicator(
-                        color: AppTheme.primaryGreen,
-                      ),
+                      child: CircularProgressIndicator(),
                     )
                   : RefreshIndicator(
-                      color: AppTheme.primaryGreen,
+                      color: cs.primary,
                       onRefresh: () => context
                           .read<ShopDiscoveryCubit>()
                           .loadAll(userId: user?.id),
                       child: state.nearbyShops.isEmpty
                           ? ListView(
-                              children: const [
-                                SizedBox(height: 80),
+                              children: [
+                                const SizedBox(height: 80),
                                 Center(
                                   child: Text(
                                     'Không tìm thấy tiệm cắt tóc phù hợp.',
-                                    style: TextStyle(
-                                      color: AppTheme.textSecondary,
-                                    ),
+                                    style: tt.bodyMuted,
                                   ),
                                 ),
                               ],
@@ -267,6 +263,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildShopCard(BuildContext context, ShopEntity shop) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
     return GestureDetector(
       onTap: () {
         ShopDetailBottomSheet.show(
@@ -277,9 +277,9 @@ class _HomePageState extends State<HomePage> {
       },
       child: Container(
         decoration: BoxDecoration(
-          color: AppTheme.surfaceWhite,
+          color: cs.surface,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: AppTheme.softCardShadow,
+          boxShadow: appColors.cardShadow,
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -293,11 +293,11 @@ class _HomePageState extends State<HomePage> {
                     shop.coverImageUrl,
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => Container(
-                      color: AppTheme.primaryGreenLight,
-                      child: const Icon(
+                      color: cs.primaryContainer,
+                      child: Icon(
                         Icons.storefront_rounded,
                         size: 48,
-                        color: AppTheme.primaryGreen,
+                        color: cs.primary,
                       ),
                     ),
                   ),
@@ -311,25 +311,21 @@ class _HomePageState extends State<HomePage> {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.95),
+                      color: appColors.translucentSurface,
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.star_rounded,
-                          color: Color(0xFFFFB300),
+                          color: appColors.starRating,
                           size: 16,
                         ),
                         const SizedBox(width: 3),
                         Text(
                           shop.rating.toStringAsFixed(1),
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.textPrimary,
-                          ),
+                          style: tt.bodySmallStrong,
                         ),
                       ],
                     ),
@@ -344,71 +340,54 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   Text(
                     shop.name,
-                    style: const TextStyle(
-                      fontSize: 16.5,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.textPrimary,
-                    ),
+                    style: tt.cardTitleLarge,
                   ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.near_me_outlined,
                         size: 15,
-                        color: AppTheme.primaryGreen,
+                        color: cs.primary,
                       ),
                       const SizedBox(width: 6),
                       Text(
                         AppFormatters.formatDistanceKm(shop.distanceKm),
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: AppTheme.textSecondary,
-                        ),
+                        style: tt.bodySmallMuted,
                       ),
                     ],
                   ),
                   const SizedBox(height: 5),
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.access_time_rounded,
                         size: 15,
-                        color: AppTheme.textSecondary,
+                        color: cs.onSurfaceVariant,
                       ),
                       const SizedBox(width: 6),
                       Text(
                         '${shop.openTime} - ${shop.closeTime}',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: AppTheme.textSecondary,
-                        ),
+                        style: tt.bodySmallMuted,
                       ),
                     ],
                   ),
                   const SizedBox(height: 5),
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.phone_in_talk_outlined,
                         size: 15,
-                        color: AppTheme.textSecondary,
+                        color: cs.onSurfaceVariant,
                       ),
                       const SizedBox(width: 6),
-                      const Text(
+                      Text(
                         'Liên hệ: ',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: AppTheme.textSecondary,
-                        ),
+                        style: tt.bodySmallMuted,
                       ),
                       Text(
                         shop.phone,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
-                        ),
+                        style: tt.bodySmallStrong,
                       ),
                     ],
                   ),
@@ -421,22 +400,20 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildActiveFilterPill(String text) {
+  Widget _buildActiveFilterPill(BuildContext context, String text) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.primaryGreenLight,
+        color: cs.primaryContainer,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         text,
-        style: const TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w700,
-          color: AppTheme.primaryGreen,
-        ),
+        style: tt.badgePrimary,
       ),
     );
   }
 }
-

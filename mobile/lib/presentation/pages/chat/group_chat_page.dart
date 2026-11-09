@@ -3,14 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/di/injection_container.dart';
+import '../../../core/enums/app_enums.dart';
 import '../../../core/network/socket_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/datasources/local/in_memory_database.dart';
+import '../../../data/datasources/remote/remote_api_datasource.dart';
 import '../../../domain/entities/social_entities.dart';
 import '../../../domain/repositories/social_repository.dart';
 import '../../blocs/auth/auth_cubit.dart';
 
-/// Màn hình Group Chat Realtime (Socket.IO) giữa Khách hàng và toàn bộ Barber của quán.
+/// Màn hình Chat Realtime (Socket.IO) trực tiếp giữa Khách hàng và Chủ quán (Manager).
 class GroupChatPage extends StatefulWidget {
   final String roomId;
   const GroupChatPage({super.key, required this.roomId});
@@ -23,6 +25,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
   final _msgCtrl = TextEditingController();
   StreamSubscription<Map<String, dynamic>>? _socketSub;
   ChatRoomEntity? _room;
+  String? _msgError;
 
   @override
   void initState() {
@@ -41,18 +44,66 @@ class _GroupChatPageState extends State<GroupChatPage> {
     super.dispose();
   }
 
-  void _loadRoom() {
+  Future<void> _loadRoom() async {
     final db = sl<InMemoryDatabase>();
     final idx = db.chatRooms.indexWhere((r) => r.id == widget.roomId);
     if (idx != -1 && mounted) {
       setState(() => _room = db.chatRooms[idx]);
     }
+    try {
+      final msgMaps =
+          await sl<RemoteApiDataSource>().getRoomMessages(widget.roomId);
+      final msgs = msgMaps.map((m) {
+        return ChatMessageEntity(
+          id: (m['id'] ?? '').toString(),
+          roomId: widget.roomId,
+          senderId: (m['senderId'] ?? '').toString(),
+          senderName: (m['senderName'] ?? 'Thành viên').toString(),
+          senderRole: UserRole.fromApi(m['senderRole']?.toString()),
+          content: (m['content'] ?? '').toString(),
+          createdAt:
+              DateTime.tryParse((m['createdAt'] ?? '').toString()) ??
+                  DateTime.now(),
+        );
+      }).toList();
+      final currentIdx = db.chatRooms.indexWhere((r) => r.id == widget.roomId);
+      final updatedRoom = currentIdx != -1
+          ? ChatRoomEntity(
+              id: db.chatRooms[currentIdx].id,
+              shopId: db.chatRooms[currentIdx].shopId,
+              shopName: db.chatRooms[currentIdx].shopName,
+              customerId: db.chatRooms[currentIdx].customerId,
+              customerName: db.chatRooms[currentIdx].customerName,
+              messages: msgs,
+            )
+          : ChatRoomEntity(
+              id: widget.roomId,
+              shopId: '',
+              shopName: 'Tư vấn khách hàng',
+              customerId: '',
+              customerName: 'Khách hàng',
+              messages: msgs,
+            );
+      if (currentIdx != -1) {
+        db.chatRooms[currentIdx] = updatedRoom;
+      } else {
+        db.chatRooms.add(updatedRoom);
+      }
+      if (mounted) {
+        setState(() => _room = updatedRoom);
+      }
+    } catch (_) {}
   }
 
   Future<void> _send() async {
     final user = context.read<AuthCubit>().state.user;
-    if (user == null || _msgCtrl.text.trim().isEmpty) return;
-    final text = _msgCtrl.text;
+    if (user == null) return;
+    if (_msgCtrl.text.trim().isEmpty) {
+      setState(() => _msgError = 'Vui lòng nhập nội dung tin nhắn trước khi gửi');
+      return;
+    }
+    setState(() => _msgError = null);
+    final text = _msgCtrl.text.trim();
     _msgCtrl.clear();
     await sl<SocialRepository>().sendChatMessage(
       roomId: widget.roomId,
@@ -64,7 +115,11 @@ class _GroupChatPageState extends State<GroupChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
     final currentUser = context.watch<AuthCubit>().state.user;
+
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -82,12 +137,12 @@ class _GroupChatPageState extends State<GroupChatPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              _room?.shopName ?? 'Group Chat Tư vấn',
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+              _room?.shopName ?? 'Chat với quán',
+              style: tt.sectionTitle,
             ),
-            const Text(
-              'Socket.IO Realtime • Tất cả Barber trong quán',
-              style: TextStyle(fontSize: 11.5, color: AppTheme.primaryGreen),
+            Text(
+              'Trò chuyện trực tiếp với Chủ quán (Quản lý)',
+              style: tt.badgePrimary,
             ),
           ],
         ),
@@ -96,7 +151,12 @@ class _GroupChatPageState extends State<GroupChatPage> {
         children: [
           Expanded(
             child: _room == null
-                ? const Center(child: Text('Không tìm thấy phòng chat'))
+                ? Center(
+                    child: Text(
+                      'Không tìm thấy phòng chat',
+                      style: tt.bodyMuted,
+                    ),
+                  )
                 : ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: _room!.messages.length,
@@ -114,11 +174,9 @@ class _GroupChatPageState extends State<GroupChatPage> {
                             vertical: 10,
                           ),
                           decoration: BoxDecoration(
-                            color: isMe
-                                ? AppTheme.primaryGreen
-                                : AppTheme.surfaceWhite,
+                            color: isMe ? cs.primary : cs.surface,
                             borderRadius: BorderRadius.circular(14),
-                            boxShadow: AppTheme.softCardShadow,
+                            boxShadow: appColors.cardShadow,
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -128,21 +186,14 @@ class _GroupChatPageState extends State<GroupChatPage> {
                                   padding: const EdgeInsets.only(bottom: 3),
                                   child: Text(
                                     '${m.senderName} (${m.senderRole.label})',
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.primaryGreen,
-                                    ),
+                                    style: tt.badgePrimary,
                                   ),
                                 ),
                               Text(
                                 m.content,
-                                style: TextStyle(
-                                  color: isMe
-                                      ? Colors.white
-                                      : AppTheme.textPrimary,
-                                  fontSize: 13.5,
-                                ),
+                                style: isMe
+                                    ? tt.bodyOnPrimary
+                                    : tt.bodyRegular,
                               ),
                             ],
                           ),
@@ -152,29 +203,36 @@ class _GroupChatPageState extends State<GroupChatPage> {
                   ),
           ),
           Container(
-            color: AppTheme.surfaceWhite,
+            color: cs.surface,
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             child: SafeArea(
               top: false,
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: TextField(
                       controller: _msgCtrl,
+                      onChanged: (_) {
+                        if (_msgError != null) {
+                          setState(() => _msgError = null);
+                        }
+                      },
                       onSubmitted: (_) => _send(),
-                      decoration: const InputDecoration(
-                        hintText: 'Nhập tin nhắn tư vấn kiểu tóc...',
+                      decoration: InputDecoration(
+                        hintText: 'Nhập tin nhắn gửi tới quán...',
+                        errorText: _msgError,
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
                   CircleAvatar(
-                    backgroundColor: AppTheme.primaryGreen,
+                    backgroundColor: cs.primary,
                     child: IconButton(
                       onPressed: _send,
-                      icon: const Icon(
+                      icon: Icon(
                         Icons.send_rounded,
-                        color: Colors.white,
+                        color: cs.onPrimary,
                         size: 18,
                       ),
                     ),
@@ -188,4 +246,3 @@ class _GroupChatPageState extends State<GroupChatPage> {
     );
   }
 }
-

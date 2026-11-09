@@ -3,8 +3,9 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 
 /// Header chuẩn Pixel-perfect theo Màn hình 3, 5, 6, 7, 9, 10:
-/// - Trái: Text xanh đậm `BARBERSMART`
-/// - Phải: Chuông thông báo kèm badge đỏ đếm số + Nút tròn xanh icon User (mở Trang cá nhân Mạng xã hội)
+/// - Trái: Text chủ đạo `BARBERSMART`
+/// - Phải: Chuông thông báo kèm badge đếm số + Nút tròn icon User (mở Trang cá nhân Mạng xã hội)
+/// Toàn bộ màu sắc & kiểu chữ kế thừa tự động từ [AppTheme].
 class BarberSmartHeader extends StatelessWidget {
   final int unreadCount;
   final VoidCallback onNotificationTap;
@@ -19,19 +20,17 @@ class BarberSmartHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final ts = context.appTextStyles;
+
     return Container(
-      color: AppTheme.surfaceWhite,
+      color: cs.surface,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
       child: Row(
         children: [
-          const Text(
+          Text(
             AppConstants.appName,
-            style: TextStyle(
-              color: AppTheme.primaryGreen,
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.6,
-            ),
+            style: ts.headerBrand,
           ),
           const Spacer(),
           InkWell(
@@ -42,9 +41,9 @@ class BarberSmartHeader extends StatelessWidget {
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.notifications_none_rounded,
-                    color: AppTheme.textPrimary,
+                    color: cs.onSurface,
                     size: 26,
                   ),
                   if (unreadCount > 0)
@@ -56,8 +55,8 @@ class BarberSmartHeader extends StatelessWidget {
                           horizontal: 5,
                           vertical: 1.5,
                         ),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFE53935),
+                        decoration: BoxDecoration(
+                          color: cs.error,
                           shape: BoxShape.circle,
                         ),
                         constraints: const BoxConstraints(
@@ -67,11 +66,7 @@ class BarberSmartHeader extends StatelessWidget {
                         child: Center(
                           child: Text(
                             unreadCount > 9 ? '9+' : '$unreadCount',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                            ),
+                            style: ts.badgeOnPrimary,
                           ),
                         ),
                       ),
@@ -87,13 +82,13 @@ class BarberSmartHeader extends StatelessWidget {
             child: Container(
               width: 36,
               height: 36,
-              decoration: const BoxDecoration(
-                color: AppTheme.primaryGreen,
+              decoration: BoxDecoration(
+                color: cs.primary,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.person_outline_rounded,
-                color: Colors.white,
+                color: cs.onPrimary,
                 size: 20,
               ),
             ),
@@ -103,4 +98,3 @@ class BarberSmartHeader extends StatelessWidget {
     );
   }
 }
-

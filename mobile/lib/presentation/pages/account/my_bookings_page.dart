@@ -40,6 +40,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
   }
 
   Future<void> _cancelBooking(BookingEntity booking) async {
+    final cs = context.colorScheme;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -54,7 +55,8 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.dangerRed,
+              backgroundColor: cs.error,
+              foregroundColor: cs.onError,
             ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Hủy lịch'),
@@ -73,13 +75,13 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
     if (!mounted) return;
     res.fold(
       onFailure: (f) => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(f.message), backgroundColor: AppTheme.dangerRed),
+        SnackBar(content: Text(f.message), backgroundColor: cs.error),
       ),
       onSuccess: (_) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            backgroundColor: AppTheme.primaryGreen,
-            content: Text('Đã hủy lịch hẹn thành công!'),
+          SnackBar(
+            backgroundColor: cs.primary,
+            content: const Text('Đã hủy lịch hẹn thành công!'),
           ),
         );
         _load();
@@ -89,6 +91,9 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -106,68 +111,68 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
         actions: [
           TextButton.icon(
             onPressed: () => context.go('/'),
-            icon: const Icon(
+            icon: Icon(
               Icons.home_outlined,
               size: 18,
-              color: AppTheme.primaryGreen,
+              color: cs.primary,
             ),
-            label: const Text(
+            label: Text(
               'Trang chủ',
-              style: TextStyle(
-                color: AppTheme.primaryGreen,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
+              style: tt.bodySmallPrimary,
             ),
           ),
         ],
       ),
       body: _loading
           ? const Center(
-              child: CircularProgressIndicator(color: AppTheme.primaryGreen),
+              child: CircularProgressIndicator(),
             )
           : _bookings.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text(
                     'Bạn chưa có lịch cắt tóc nào.',
-                    style: TextStyle(color: AppTheme.textSecondary),
+                    style: tt.bodyMuted,
                   ),
                 )
               : ListView.separated(
                   padding: const EdgeInsets.all(16),
                   itemCount: _bookings.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (ctx, i) => _buildBookingCard(_bookings[i]),
+                  itemBuilder: (ctx, i) => _buildBookingCard(ctx, _bookings[i]),
                 ),
     );
   }
 
-  Widget _buildBookingCard(BookingEntity b) {
-    final (badgeBg, badgeColor) = switch (b.status) {
+  Widget _buildBookingCard(BuildContext context, BookingEntity b) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
+    final (badgeBg, badgeStyle) = switch (b.status) {
       BookingStatus.completed => (
-          AppTheme.primaryGreenLight,
-          AppTheme.primaryGreen,
+          cs.primaryContainer,
+          tt.badgePrimary,
         ),
       BookingStatus.cancelled => (
-          const Color(0xFFFDECEC),
-          AppTheme.dangerRed,
+          cs.errorContainer,
+          tt.badgeDanger,
         ),
       BookingStatus.pending => (
-          const Color(0xFFFFF4E5),
-          const Color(0xFFD97706),
+          appColors.warningContainer,
+          tt.badgeWarning,
         ),
       BookingStatus.confirmed => (
-          const Color(0xFFE8F1FF),
-          const Color(0xFF1D4ED8),
+          appColors.infoContainer,
+          tt.badgePrimary.copyWith(color: appColors.info),
         ),
     };
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceWhite,
+        color: cs.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: AppTheme.softCardShadow,
+        boxShadow: appColors.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -177,10 +182,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
               Expanded(
                 child: Text(
                   b.shopName,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15.5,
-                  ),
+                  style: tt.cardTitleLarge,
                 ),
               ),
               Container(
@@ -194,11 +196,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                 ),
                 child: Text(
                   b.status.label,
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    color: badgeColor,
-                  ),
+                  style: badgeStyle,
                 ),
               ),
             ],
@@ -206,12 +204,12 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
           const SizedBox(height: 8),
           Text(
             'Barber: ${b.barberName} • Ngày ${AppFormatters.formatDateDdMmYyyy(b.date)} (${b.timeRangeLabel})',
-            style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+            style: tt.bodySmallMuted,
           ),
           const SizedBox(height: 4),
           Text(
             'Dịch vụ: ${b.services.map((s) => s.name).join(', ')}',
-            style: const TextStyle(fontSize: 13),
+            style: tt.bodyRegular,
           ),
           const SizedBox(height: 10),
           Row(
@@ -225,18 +223,11 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                   children: [
                     Text(
                       AppFormatters.formatVnd(b.totalPrice),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.primaryGreen,
-                      ),
+                      style: tt.pricePrimary,
                     ),
                     Text(
                       '(${b.paymentMethod.label})',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary,
-                      ),
+                      style: tt.bodySmallMuted,
                     ),
                   ],
                 ),
@@ -245,17 +236,17 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                 const SizedBox(width: 8),
                 OutlinedButton(
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.dangerRed,
-                    side: const BorderSide(color: AppTheme.dangerRed),
+                    foregroundColor: cs.error,
+                    side: BorderSide(color: cs.error),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 8,
                     ),
                   ),
                   onPressed: () => _cancelBooking(b),
-                  child: const Text(
+                  child: Text(
                     'Hủy lịch',
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                    style: tt.bodySmallDanger,
                   ),
                 ),
               ],
@@ -266,4 +257,3 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
     );
   }
 }
-

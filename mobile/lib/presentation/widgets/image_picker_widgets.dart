@@ -1,6 +1,9 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../core/di/injection_container.dart';
 import '../../core/theme/app_theme.dart';
@@ -18,9 +21,264 @@ String _extractUploadError(Object error) {
   return error.toString();
 }
 
+/// Hộp thoại Căn chỉnh ảnh (Crop & Pan/Zoom) chuẩn Mobile App:
+/// - Nếu là Avatar (`isSquareAvatar: true`): Khung cắt hình Ô Vuông (1:1).
+/// - Nếu là Background / Ảnh bìa (`isSquareAvatar: false`): Khung cắt Hình chữ nhật (16:9).
+/// - Hỗ trợ kéo thả trực tiếp (trái, phải, lên, xuống), phóng to / thu nhỏ (1.0x - 4.0x)
+///   kèm thanh trượt Zoom và các nút điều hướng tinh chỉnh.
+class _ImageCropAdjustDialog extends StatefulWidget {
+  final Uint8List imageBytes;
+  final bool isSquareAvatar;
+  final String title;
+
+  const _ImageCropAdjustDialog({
+    required this.imageBytes,
+    required this.isSquareAvatar,
+    required this.title,
+  });
+
+  @override
+  State<_ImageCropAdjustDialog> createState() => _ImageCropAdjustDialogState();
+}
+
+class _ImageCropAdjustDialogState extends State<_ImageCropAdjustDialog> {
+  final GlobalKey _cropBoundaryKey = GlobalKey();
+  double _scale = 1.0;
+  double _baseScale = 1.0;
+  Offset _offset = Offset.zero;
+  bool _exporting = false;
+
+  void _resetTransform() {
+    setState(() {
+      _scale = 1.0;
+      _baseScale = 1.0;
+      _offset = Offset.zero;
+    });
+  }
+
+  Future<void> _confirmCrop() async {
+    setState(() => _exporting = true);
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      final boundary = _cropBoundaryKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) {
+        if (mounted) Navigator.of(context).pop(widget.imageBytes);
+        return;
+      }
+      final ui.Image image = await boundary.toImage(pixelRatio: 2.2);
+      final ByteData? byteData =
+          await image.toByteData(format: ui.ImageByteFormat.png);
+      if (!mounted) return;
+      if (byteData != null) {
+        Navigator.of(context).pop(byteData.buffer.asUint8List());
+      } else {
+        Navigator.of(context).pop(widget.imageBytes);
+      }
+    } catch (_) {
+      if (mounted) Navigator.of(context).pop(widget.imageBytes);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final maxBoxWidth = math.min(screenWidth - 64, 300.0);
+    final cropWidth = maxBoxWidth;
+    final cropHeight =
+        widget.isSquareAvatar ? maxBoxWidth : (maxBoxWidth * 9.0 / 16.0);
+
+    return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      title: Text(
+        'Căn chỉnh ảnh',
+        style: tt.dialogTitle,
+      ),
+      content: SizedBox(
+        width: 340,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: cropWidth + 4,
+                  height: cropHeight + 4,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: cs.primary, width: 2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        RepaintBoundary(
+                          key: _cropBoundaryKey,
+                          child: Container(
+                            width: cropWidth,
+                            height: cropHeight,
+                            color: cs.inverseSurface,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onScaleStart: (_) {
+                                _baseScale = _scale;
+                              },
+                              onScaleUpdate: (details) {
+                                setState(() {
+                                  if ((details.scale - 1.0).abs() > 0.01) {
+                                    _scale = (_baseScale * details.scale)
+                                        .clamp(0.8, 4.0);
+                                  }
+                                  _offset = Offset(
+                                    (_offset.dx + details.focalPointDelta.dx)
+                                        .clamp(-260.0, 260.0),
+                                    (_offset.dy + details.focalPointDelta.dy)
+                                        .clamp(-260.0, 260.0),
+                                  );
+                                });
+                              },
+                              child: ClipRect(
+                                child: Transform.translate(
+                                  offset: _offset,
+                                  child: Transform.scale(
+                                    scale: _scale,
+                                    child: Image.memory(
+                                      widget.imageBytes,
+                                      width: cropWidth,
+                                      height: cropHeight,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        // Khung lưới dẫn hướng (không nằm trong RepaintBoundary nên không dính vào ảnh xuất ra)
+                        IgnorePointer(
+                          child: CustomPaint(
+                            painter: _CropGridOverlayPainter(
+                              lineColor: cs.onPrimary.withValues(alpha: 0.45),
+                              showCircleGuide: widget.isSquareAvatar,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Thu nhỏ',
+                    onPressed: () {
+                      setState(() {
+                        _scale = (_scale - 0.15).clamp(0.8, 4.0);
+                      });
+                    },
+                    icon: Icon(Icons.remove_circle_outline, color: cs.primary),
+                  ),
+                  Expanded(
+                    child: Slider(
+                      value: _scale.clamp(0.8, 4.0),
+                      min: 0.8,
+                      max: 4.0,
+                      onChanged: (v) => setState(() => _scale = v),
+                    ),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Phóng to',
+                    onPressed: () {
+                      setState(() {
+                        _scale = (_scale + 0.15).clamp(0.8, 4.0);
+                      });
+                    },
+                    icon: Icon(Icons.add_circle_outline, color: cs.primary),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Đặt lại',
+                    onPressed: _resetTransform,
+                    icon: Icon(Icons.refresh_rounded, color: cs.primary),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _exporting ? null : () => Navigator.of(context).pop(null),
+          child: const Text('Hủy'),
+        ),
+        ElevatedButton(
+          onPressed: _exporting ? null : _confirmCrop,
+          child: Text(_exporting ? 'Đang xử lý...' : 'Xác nhận'),
+        ),
+      ],
+    );
+  }
+}
+
+class _CropGridOverlayPainter extends CustomPainter {
+  final Color lineColor;
+  final bool showCircleGuide;
+
+  const _CropGridOverlayPainter({
+    required this.lineColor,
+    required this.showCircleGuide,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = lineColor
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+
+    // Lưới 3x3
+    final thirdW = size.width / 3;
+    final thirdH = size.height / 3;
+    for (int i = 1; i <= 2; i++) {
+      canvas.drawLine(
+        Offset(thirdW * i, 0),
+        Offset(thirdW * i, size.height),
+        paint,
+      );
+      canvas.drawLine(
+        Offset(0, thirdH * i),
+        Offset(size.width, thirdH * i),
+        paint,
+      );
+    }
+
+    if (showCircleGuide) {
+      canvas.drawCircle(
+        Offset(size.width / 2, size.height / 2),
+        (math.min(size.width, size.height) / 2) - 4,
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CropGridOverlayPainter oldDelegate) {
+    return oldDelegate.lineColor != lineColor ||
+        oldDelegate.showCircleGuide != showCircleGuide;
+  }
+}
+
 /// Widget chọn 1 ảnh duy nhất (dùng cho Avatar, Ảnh bìa Profile, Ảnh bìa Quán):
 /// Hỗ trợ song song 2 lựa chọn:
-/// 1. Tải ảnh từ Thiết bị (Thư viện / Camera) -> gửi lên NestJS -> Cloudinary -> trả về HTTPS URL.
+/// 1. Tải ảnh từ Thiết bị (Thư viện / Camera) -> Mở bước Căn chỉnh ảnh (Ô vuông cho Avatar, Hình chữ nhật cho Background) -> Cloudinary -> trả về HTTPS URL.
 /// 2. Nhập trực tiếp URL ảnh (https://...).
 class SingleImagePickerField extends StatefulWidget {
   final String label;
@@ -65,17 +323,35 @@ class _SingleImagePickerFieldState extends State<SingleImagePickerField> {
     try {
       final XFile? picked = await _picker.pickImage(
         source: source,
-        imageQuality: 85,
-        maxWidth: 1600,
+        imageQuality: 90,
+        maxWidth: 1800,
       );
       if (picked == null || !mounted) return;
 
-      setState(() => _uploading = true);
-      final urls = await sl<RemoteApiDataSource>().uploadImages([picked]);
+      final rawBytes = await picked.readAsBytes();
       if (!mounted) return;
 
-      if (urls.isNotEmpty) {
-        final uploadedUrl = urls.first;
+      // Bước căn chỉnh ảnh (Ô vuông cho Avatar, Hình chữ nhật cho Background)
+      final Uint8List? croppedBytes = await showDialog<Uint8List>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _ImageCropAdjustDialog(
+          imageBytes: rawBytes,
+          isSquareAvatar: widget.isCircularPreview,
+          title: widget.label,
+        ),
+      );
+      if (croppedBytes == null || !mounted) return;
+
+      setState(() => _uploading = true);
+      final uploadedUrl = await sl<RemoteApiDataSource>().uploadImageBytes(
+        croppedBytes,
+        filename:
+            'barbersmart_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      if (!mounted) return;
+
+      if (uploadedUrl != null && uploadedUrl.isNotEmpty) {
         setState(() {
           _currentUrl = uploadedUrl;
           _urlCtrl.text = uploadedUrl;
@@ -83,9 +359,9 @@ class _SingleImagePickerFieldState extends State<SingleImagePickerField> {
         });
         widget.onChanged(uploadedUrl);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            backgroundColor: AppTheme.primaryGreen,
-            content: Text('Tải ảnh lên Cloudinary thành công!'),
+          SnackBar(
+            backgroundColor: context.colorScheme.primary,
+            content: const Text('Đã căn chỉnh và tải ảnh lên thành công!'),
           ),
         );
       } else {
@@ -96,7 +372,7 @@ class _SingleImagePickerFieldState extends State<SingleImagePickerField> {
       setState(() => _uploading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppTheme.dangerRed,
+          backgroundColor: context.colorScheme.error,
           content: Text(_extractUploadError(e)),
         ),
       );
@@ -105,25 +381,23 @@ class _SingleImagePickerFieldState extends State<SingleImagePickerField> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final ts = context.appTextStyles;
     final hasPreview = _currentUrl.startsWith('http');
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppTheme.inputFill,
+        color: cs.surfaceContainer,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: cs.outline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             widget.label,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary,
-            ),
+            style: ts.bodySmallStrong,
           ),
           const SizedBox(height: 10),
           Center(
@@ -133,15 +407,15 @@ class _SingleImagePickerFieldState extends State<SingleImagePickerField> {
                 if (widget.isCircularPreview)
                   CircleAvatar(
                     radius: 36,
-                    backgroundColor: AppTheme.primaryGreenLight,
+                    backgroundColor: cs.primaryContainer,
                     backgroundImage:
                         hasPreview ? NetworkImage(_currentUrl) : null,
                     onBackgroundImageError: hasPreview ? (_, __) {} : null,
                     child: !hasPreview
-                        ? const Icon(
+                        ? Icon(
                             Icons.person_outline_rounded,
                             size: 34,
-                            color: AppTheme.primaryGreen,
+                            color: cs.primary,
                           )
                         : null,
                   )
@@ -151,23 +425,23 @@ class _SingleImagePickerFieldState extends State<SingleImagePickerField> {
                     child: Container(
                       height: 112,
                       width: double.infinity,
-                      color: AppTheme.primaryGreenLight,
+                      color: cs.primaryContainer,
                       child: hasPreview
                           ? Image.network(
                               _currentUrl,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => const Center(
+                              errorBuilder: (_, __, ___) => Center(
                                 child: Icon(
                                   Icons.broken_image_outlined,
-                                  color: AppTheme.textSecondary,
+                                  color: cs.onSurfaceVariant,
                                   size: 32,
                                 ),
                               ),
                             )
-                          : const Center(
+                          : Center(
                               child: Icon(
                                 Icons.image_outlined,
-                                color: AppTheme.primaryGreen,
+                                color: cs.primary,
                                 size: 34,
                               ),
                             ),
@@ -177,15 +451,15 @@ class _SingleImagePickerFieldState extends State<SingleImagePickerField> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.black54,
+                      color: cs.scrim,
                       borderRadius: BorderRadius.circular(24),
                     ),
-                    child: const SizedBox(
+                    child: SizedBox(
                       width: 22,
                       height: 22,
                       child: CircularProgressIndicator(
                         strokeWidth: 2.5,
-                        color: Colors.white,
+                        color: cs.onPrimary,
                       ),
                     ),
                   ),
@@ -207,9 +481,9 @@ class _SingleImagePickerFieldState extends State<SingleImagePickerField> {
                     ),
                   ),
                   icon: const Icon(Icons.photo_library_outlined, size: 17),
-                  label: const Text(
+                  label: Text(
                     'Thư viện',
-                    style: TextStyle(fontSize: 12),
+                    style: ts.badgePrimary,
                   ),
                 ),
               ),
@@ -226,9 +500,9 @@ class _SingleImagePickerFieldState extends State<SingleImagePickerField> {
                     ),
                   ),
                   icon: const Icon(Icons.camera_alt_outlined, size: 17),
-                  label: const Text(
+                  label: Text(
                     'Camera',
-                    style: TextStyle(fontSize: 12),
+                    style: ts.badgePrimary,
                   ),
                 ),
               ),
@@ -242,9 +516,9 @@ class _SingleImagePickerFieldState extends State<SingleImagePickerField> {
               setState(() => _currentUrl = trimmed);
               widget.onChanged(trimmed);
             },
-            style: const TextStyle(fontSize: 12.5),
+            style: ts.bodySmallStrong,
             decoration: InputDecoration(
-              fillColor: AppTheme.surfaceWhite,
+              fillColor: cs.surface,
               isDense: true,
               hintText:
                   widget.hintText ?? 'Hoặc dán URL ảnh trực tiếp (https://...)',
@@ -335,7 +609,7 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
       setState(() => _uploading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppTheme.dangerRed,
+          backgroundColor: context.colorScheme.error,
           content: Text(_extractUploadError(e)),
         ),
       );
@@ -367,7 +641,7 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
       setState(() => _uploading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppTheme.dangerRed,
+          backgroundColor: context.colorScheme.error,
           content: Text(_extractUploadError(e)),
         ),
       );
@@ -379,9 +653,9 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
     if (raw.isEmpty) return;
     if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: AppTheme.dangerRed,
-          content: Text('URL ảnh phải bắt đầu bằng http:// hoặc https://'),
+        SnackBar(
+          backgroundColor: context.colorScheme.error,
+          content: const Text('URL ảnh phải bắt đầu bằng http:// hoặc https://'),
         ),
       );
       return;
@@ -389,7 +663,7 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
     if (_urls.length >= widget.maxImages) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: AppTheme.dangerRed,
+          backgroundColor: context.colorScheme.error,
           content: Text('Chỉ được đính kèm tối đa ${widget.maxImages} ảnh'),
         ),
       );
@@ -411,14 +685,16 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final ts = context.appTextStyles;
     final canAddMore = _urls.length < widget.maxImages && !_uploading;
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppTheme.inputFill,
+        color: cs.surfaceContainer,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: cs.outline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -428,20 +704,16 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
               Expanded(
                 child: Text(
                   '${widget.label} (${_urls.length}/${widget.maxImages})',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
-                  ),
+                  style: ts.bodySmallStrong,
                 ),
               ),
               if (_uploading)
-                const SizedBox(
+                SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: AppTheme.primaryGreen,
+                    color: cs.primary,
                   ),
                 ),
             ],
@@ -467,7 +739,7 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
                         errorBuilder: (_, __, ___) => Container(
                           width: 76,
                           height: 76,
-                          color: Colors.grey.shade300,
+                          color: cs.surfaceContainerHighest,
                           child: const Icon(Icons.broken_image_outlined),
                         ),
                       ),
@@ -480,14 +752,14 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
                         child: Container(
                           width: 22,
                           height: 22,
-                          decoration: const BoxDecoration(
-                            color: Colors.black87,
+                          decoration: BoxDecoration(
+                            color: cs.scrim,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.close_rounded,
                             size: 14,
-                            color: Colors.white,
+                            color: cs.onPrimary,
                           ),
                         ),
                       ),
@@ -510,9 +782,9 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
                     ),
                   ),
                   icon: const Icon(Icons.photo_library_outlined, size: 17),
-                  label: const Text(
+                  label: Text(
                     'Từ Thiết bị',
-                    style: TextStyle(fontSize: 12),
+                    style: ts.badgePrimary,
                   ),
                 ),
               ),
@@ -527,9 +799,9 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
                     ),
                   ),
                   icon: const Icon(Icons.camera_alt_outlined, size: 17),
-                  label: const Text(
+                  label: Text(
                     'Chụp Camera',
-                    style: TextStyle(fontSize: 12),
+                    style: ts.badgePrimary,
                   ),
                 ),
               ),
@@ -543,12 +815,12 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
                   controller: _directUrlCtrl,
                   enabled: canAddMore,
                   onSubmitted: (_) => _addDirectUrl(),
-                  style: const TextStyle(fontSize: 12.5),
-                  decoration: const InputDecoration(
-                    fillColor: AppTheme.surfaceWhite,
+                  style: ts.bodySmallStrong,
+                  decoration: InputDecoration(
+                    fillColor: cs.surface,
                     isDense: true,
                     hintText: 'Hoặc nhập URL ảnh trực tiếp (https://...)',
-                    prefixIcon: Icon(Icons.link_rounded, size: 18),
+                    prefixIcon: const Icon(Icons.link_rounded, size: 18),
                   ),
                 ),
               ),
@@ -559,7 +831,7 @@ class _MultiImagePickerFieldState extends State<MultiImagePickerField> {
                   minimumSize: const Size(64, 42),
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                 ),
-                child: const Text('Thêm', style: TextStyle(fontSize: 12.5)),
+                child: Text('Thêm', style: ts.bodySmallOnPrimary),
               ),
             ],
           ),

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -20,11 +21,16 @@ import {
   BarberEntity,
   BookingEntity,
   BookingStatus,
+  NotificationType,
   ReviewEntity,
   ServiceEntity,
   ShopEntity,
   UserEntity,
+  UserRole,
 } from '../../database/entities';
+import { VN_PHONE_REGEX } from '../auth/auth.module';
+import { NotificationsService } from '../notifications/notifications.module';
+import { RealtimeGateway } from '../realtime/realtime.module';
 
 @Injectable()
 export class ShopsService {
@@ -39,6 +45,10 @@ export class ShopsService {
     private readonly reviewRepo: Repository<ReviewEntity>,
     @InjectRepository(BookingEntity)
     private readonly bookingRepo: Repository<BookingEntity>,
+    @InjectRepository(UserEntity)
+    private readonly userRepo: Repository<UserEntity>,
+    private readonly notificationsService: NotificationsService,
+    private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
   private haversineKm(
@@ -54,7 +64,9 @@ export class ShopsService {
     const a =
       Math.sin(dLat / 2) ** 2 +
       Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-    return Number((R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1));
+    return Number(
+      (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1),
+    );
   }
 
   async findNearby(params: {
@@ -101,7 +113,10 @@ export class ShopsService {
   }
 
   async findDetail(shopId: string) {
-    const shop = await this.shopRepo.findOne({ where: { id: shopId } });
+    const shop = await this.shopRepo.findOne({
+      where: { id: shopId },
+      relations: ['owner'],
+    });
     if (!shop) throw new NotFoundException('Không tìm thấy quán');
 
     const services = await this.serviceRepo.find({
@@ -119,12 +134,16 @@ export class ShopsService {
 
     return {
       ...shop,
+      ownerName: shop.owner?.fullName ?? '',
+      ownerPhone: shop.owner?.phone ?? '',
+      ownerEmail: shop.owner?.email ?? '',
       services,
       barbers: barbers.map((b) => ({
         id: b.id,
         userId: b.userId,
         fullName: b.user.fullName,
         email: b.user.email,
+        phone: b.user.phone,
         avatarUrl: b.user.avatarUrl ?? '',
         baseSalary: b.baseSalary,
         isActive: b.isActive,
@@ -143,11 +162,159 @@ export class ShopsService {
     };
   }
 
+  /**
+   * Admin: Lấy danh sách các quán đang ở trạng thái "Chờ duyệt" (`isActive: false`).
+   */
+  async findAdminPendingShops(adminUser: UserEntity) {
+    if (adminUser.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Chỉ Admin mới có quyền xem danh sách duyệt quán');
+    }
+    const list = await this.shopRepo.find({
+      where: { isActive: false },
+      relations: ['owner'],
+      order: { createdAt: 'DESC' },
+    });
+    return list.map((s) => ({
+      ...s,
+      ownerName: s.owner?.fullName ?? '',
+      ownerPhone: s.owner?.phone ?? '',
+      ownerEmail: s.owner?.email ?? '',
+    }));
+  }
+
+  /**
+   * Admin: Lấy danh sách tất cả các quán đang hoạt động (`isActive: true`).
+   */
+  async findAdminActiveShops(adminUser: UserEntity) {
+    if (adminUser.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Chỉ Admin mới có quyền quản lý danh sách quán');
+    }
+    const list = await this.shopRepo.find({
+      where: { isActive: true },
+      relations: ['owner'],
+      order: { createdAt: 'DESC' },
+    });
+    return list.map((s) => ({
+      ...s,
+      ownerName: s.owner?.fullName ?? '',
+      ownerPhone: s.owner?.phone ?? '',
+      ownerEmail: s.owner?.email ?? '',
+    }));
+  }
+
+  /**
+   * Admin: Phê duyệt yêu cầu mở quán -> kích hoạt quán (`isActive = true`),
+   * nâng cấp chủ quán lên `MANAGER`, và gửi thông báo thật.
+   */
+  async approveShopByAdmin(adminUser: UserEntity, shopId: string) {
+    if (adminUser.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Chỉ Admin mới có quyền duyệt quán');
+    }
+    const shop = await this.shopRepo.findOne({
+      where: { id: shopId },
+      relations: ['owner'],
+    });
+    if (!shop) {
+      throw new NotFoundException('Không tìm thấy quán cần duyệt');
+    }
+
+    shop.isActive = true;
+    await this.shopRepo.save(shop);
+
+    const owner = await this.userRepo.findOne({ where: { id: shop.ownerId } });
+    if (owner && owner.role !== UserRole.ADMIN) {
+      owner.role = UserRole.MANAGER;
+      await this.userRepo.save(owner);
+      this.realtimeGateway.emitUserRoleUpdated(owner.id, {
+        newRole: UserRole.MANAGER,
+        ownedShopId: shop.id,
+      });
+    }
+
+    await this.notificationsService.createAndPush({
+      recipientId: shop.ownerId,
+      title: 'Quán của bạn đã được Admin phê duyệt!',
+      body: `Chúc mừng! Quán "${shop.name}" đã được Admin duyệt hoạt động. Tài khoản của bạn đã được nâng cấp thành Quản lý quán.`,
+      type: NotificationType.SHOP_APPROVAL,
+      metadata: { shopId: shop.id, approved: true },
+    });
+
+    return {
+      ...shop,
+      ownerName: shop.owner?.fullName ?? '',
+      ownerPhone: shop.owner?.phone ?? '',
+      ownerEmail: shop.owner?.email ?? '',
+    };
+  }
+
+  /**
+   * Admin: Từ chối yêu cầu mở quán hoặc Xoá một quán đang hoạt động khỏi hệ thống.
+   */
+  async deleteShopByAdmin(adminUser: UserEntity, shopId: string) {
+    if (adminUser.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Chỉ Admin mới có quyền xoá hoặc từ chối quán');
+    }
+    const shop = await this.shopRepo.findOne({
+      where: { id: shopId },
+      relations: ['owner'],
+    });
+    if (!shop) {
+      throw new NotFoundException('Không tìm thấy quán');
+    }
+
+    const wasActive = shop.isActive;
+    const ownerId = shop.ownerId;
+    const shopName = shop.name;
+
+    // Reset role của các Barber thuộc quán về USER
+    const shopBarbers = await this.barberRepo.find({ where: { shopId } });
+    for (const b of shopBarbers) {
+      await this.userRepo.update(b.userId, { role: UserRole.USER });
+      this.realtimeGateway.emitUserRoleUpdated(b.userId, {
+        newRole: UserRole.USER,
+      });
+    }
+
+    await this.shopRepo.delete(shop.id);
+
+    // Reset role của chủ quán về USER (nếu không phải ADMIN)
+    const owner = await this.userRepo.findOne({ where: { id: ownerId } });
+    if (owner && owner.role === UserRole.MANAGER) {
+      owner.role = UserRole.USER;
+      await this.userRepo.save(owner);
+      this.realtimeGateway.emitUserRoleUpdated(owner.id, {
+        newRole: UserRole.USER,
+      });
+    }
+
+    await this.notificationsService.createAndPush({
+      recipientId: ownerId,
+      title: wasActive
+        ? `Quán "${shopName}" đã bị xoá khỏi hệ thống`
+        : `Yêu cầu mở quán "${shopName}" đã bị từ chối`,
+      body: wasActive
+        ? `Admin hệ thống đã gỡ quán "${shopName}". Tài khoản của bạn đã chuyển về vai trò Khách hàng.`
+        : `Yêu cầu đăng ký mở quán "${shopName}" chưa được Admin phê duyệt. Bạn có thể kiểm tra thông tin và đăng ký lại.`,
+      type: NotificationType.SHOP_APPROVAL,
+      metadata: { shopId, approved: false },
+    });
+
+    return { deleted: true, id: shopId };
+  }
+
   async updateShop(shopId: string, ownerId: string, dto: Partial<ShopEntity>) {
     const shop = await this.shopRepo.findOne({ where: { id: shopId } });
     if (!shop) throw new NotFoundException('Không tìm thấy quán');
     if (shop.ownerId !== ownerId) {
       throw new ForbiddenException('Bạn không phải Quản lý của quán này');
+    }
+
+    if (dto.phone !== undefined) {
+      const cleanPhone = dto.phone.trim();
+      if (!VN_PHONE_REGEX.test(cleanPhone)) {
+        throw new BadRequestException('số điện thoại không đúng');
+      }
+      dto.phone = cleanPhone;
     }
 
     Object.assign(shop, {
@@ -167,11 +334,18 @@ export class ShopsService {
   async createService(
     shopId: string,
     ownerId: string,
-    dto: { name: string; price: number; durationMinutes: number; description?: string },
+    dto: {
+      name: string;
+      price: number;
+      durationMinutes: number;
+      description?: string;
+    },
   ) {
     const shop = await this.shopRepo.findOne({ where: { id: shopId } });
     if (!shop || shop.ownerId !== ownerId) {
-      throw new ForbiddenException('Không có quyền quản lý dịch vụ của quán này');
+      throw new ForbiddenException(
+        'Không có quyền quản lý dịch vụ của quán này',
+      );
     }
     return this.serviceRepo.save(
       this.serviceRepo.create({
@@ -187,7 +361,12 @@ export class ShopsService {
   async updateService(
     serviceId: string,
     ownerId: string,
-    dto: { name?: string; price?: number; durationMinutes?: number; description?: string },
+    dto: {
+      name?: string;
+      price?: number;
+      durationMinutes?: number;
+      description?: string;
+    },
   ) {
     const srv = await this.serviceRepo.findOne({
       where: { id: serviceId },
@@ -223,8 +402,7 @@ export class ShopsService {
 
   /**
    * Thống kê Doanh thu quán & Bảng lương Barber:
-   * Chỉ tính các Booking có trạng thái COMPLETED (khách quét QR SePay thành công
-   * hoặc Barber đã bấm nút "Xác nhận đã thanh toán").
+   * Chỉ tính các Booking có trạng thái COMPLETED.
    */
   async getPayrollAndRevenue(shopId: string, ownerId: string) {
     const shop = await this.shopRepo.findOne({ where: { id: shopId } });
@@ -248,8 +426,8 @@ export class ShopsService {
 
     const barberPayrolls = barbers.map((barber) => {
       const barberRevenue = completedBookings
-          .filter((b) => b.barberId === barber.id)
-          .reduce((sum, b) => sum + b.totalPrice, 0);
+        .filter((b) => b.barberId === barber.id)
+        .reduce((sum, b) => sum + b.totalPrice, 0);
       const commission = Math.round(barberRevenue * 0.1);
       return {
         barberId: barber.id,
@@ -305,6 +483,30 @@ export class ShopsController {
     return this.shopsService.findHighlighted();
   }
 
+  @Get('admin/pending')
+  @UseGuards(JwtAuthGuard)
+  findAdminPending(@CurrentUser() user: UserEntity) {
+    return this.shopsService.findAdminPendingShops(user);
+  }
+
+  @Get('admin/all')
+  @UseGuards(JwtAuthGuard)
+  findAdminAll(@CurrentUser() user: UserEntity) {
+    return this.shopsService.findAdminActiveShops(user);
+  }
+
+  @Patch(':id/approve')
+  @UseGuards(JwtAuthGuard)
+  approveShop(@Param('id') id: string, @CurrentUser() user: UserEntity) {
+    return this.shopsService.approveShopByAdmin(user, id);
+  }
+
+  @Delete(':id/admin')
+  @UseGuards(JwtAuthGuard)
+  deleteShopByAdmin(@Param('id') id: string, @CurrentUser() user: UserEntity) {
+    return this.shopsService.deleteShopByAdmin(user, id);
+  }
+
   @Get('me/owned')
   @UseGuards(JwtAuthGuard)
   findMyShop(@CurrentUser() user: UserEntity) {
@@ -331,9 +533,31 @@ export class ShopsController {
   createService(
     @Param('id') id: string,
     @CurrentUser() user: UserEntity,
-    @Body() dto: { name: string; price: number; durationMinutes: number; description?: string },
+    @Body()
+    dto: {
+      name: string;
+      price: number;
+      durationMinutes: number;
+      description?: string;
+    },
   ) {
     return this.shopsService.createService(id, user.id, dto);
+  }
+
+  @Patch('services/:serviceId')
+  @UseGuards(JwtAuthGuard)
+  updateService(
+    @Param('serviceId') serviceId: string,
+    @CurrentUser() user: UserEntity,
+    @Body()
+    dto: {
+      name?: string;
+      price?: number;
+      durationMinutes?: number;
+      description?: string;
+    },
+  ) {
+    return this.shopsService.updateService(serviceId, user.id, dto);
   }
 
   @Delete('services/:serviceId')
@@ -360,6 +584,7 @@ export class ShopsController {
       BarberEntity,
       ReviewEntity,
       BookingEntity,
+      UserEntity,
     ]),
   ],
   controllers: [ShopsController],
@@ -367,4 +592,3 @@ export class ShopsController {
   exports: [ShopsService],
 })
 export class ShopsModule {}
-

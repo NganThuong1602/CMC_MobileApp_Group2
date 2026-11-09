@@ -10,8 +10,8 @@ import '../shop/shop_detail_bottom_sheet.dart';
 
 /// Màn hình Nổi bật chuẩn Pixel-perfect theo Ảnh 6:
 /// - Danh sách các quán đang mua gói Nổi bật còn hiệu lực.
-/// - Card ảnh to phủ toàn bộ, gradient đen dưới đáy, tên quán màu trắng góc trái dưới,
-///   nút xanh lá `Đặt lịch` góc phải dưới.
+/// - Card ảnh to phủ toàn bộ, gradient đen dưới đáy, tên quán góc trái dưới,
+///   nút `Đặt lịch` góc phải dưới.
 class HighlightsPage extends StatelessWidget {
   final VoidCallback onNavigateToMapTab;
 
@@ -22,7 +22,10 @@ class HighlightsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
     final user = context.watch<AuthCubit>().state.user;
+
     return BlocBuilder<ShopDiscoveryCubit, ShopDiscoveryState>(
       builder: (context, state) {
         return Column(
@@ -41,18 +44,18 @@ class HighlightsPage extends StatelessWidget {
             ),
             Expanded(
               child: RefreshIndicator(
-                color: AppTheme.primaryGreen,
+                color: cs.primary,
                 onRefresh: () => context
                     .read<ShopDiscoveryCubit>()
                     .loadAll(userId: user?.id),
                 child: state.highlightedShops.isEmpty
                     ? ListView(
-                        children: const [
-                          SizedBox(height: 80),
+                        children: [
+                          const SizedBox(height: 80),
                           Center(
                             child: Text(
                               'Hiện chưa có quán nào kích hoạt gói Nổi bật.',
-                              style: TextStyle(color: AppTheme.textSecondary),
+                              style: tt.bodyMuted,
                             ),
                           ),
                         ],
@@ -75,6 +78,10 @@ class HighlightsPage extends StatelessWidget {
   }
 
   Widget _buildHighlightBannerCard(BuildContext context, ShopEntity shop) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
     return GestureDetector(
       onTap: () => ShopDetailBottomSheet.show(
         context,
@@ -85,7 +92,7 @@ class HighlightsPage extends StatelessWidget {
         height: 176,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
-          boxShadow: AppTheme.softCardShadow,
+          boxShadow: appColors.cardShadow,
         ),
         clipBehavior: Clip.antiAlias,
         child: Stack(
@@ -95,7 +102,7 @@ class HighlightsPage extends StatelessWidget {
               shop.coverImageUrl,
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => Container(
-                color: const Color(0xFF1F2937),
+                color: cs.inverseSurface,
               ),
             ),
             Container(
@@ -104,8 +111,8 @@ class HighlightsPage extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Colors.black.withValues(alpha: 0.08),
-                    Colors.black.withValues(alpha: 0.78),
+                    appColors.bannerOverlayTop,
+                    appColors.bannerOverlayBottom,
                   ],
                 ),
               ),
@@ -122,25 +129,15 @@ class HighlightsPage extends StatelessWidget {
                       shop.name,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16.5,
-                        fontWeight: FontWeight.w800,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black54,
-                            blurRadius: 6,
-                          ),
-                        ],
-                      ),
+                      style: tt.bannerOverlayTitle,
                     ),
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
                     onPressed: () => context.push('/booking/${shop.id}'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryGreen,
-                      foregroundColor: Colors.white,
+                      backgroundColor: cs.primary,
+                      foregroundColor: cs.onPrimary,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 18,
                         vertical: 10,
@@ -149,12 +146,9 @@ class HighlightsPage extends StatelessWidget {
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    child: const Text(
+                    child: Text(
                       'Đặt lịch',
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                      ),
+                      style: tt.buttonLabel,
                     ),
                   ),
                 ],
@@ -166,4 +160,3 @@ class HighlightsPage extends StatelessWidget {
     );
   }
 }
-

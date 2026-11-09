@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:barber_booking_app/app.dart';
 import 'package:barber_booking_app/core/di/injection_container.dart';
 import 'package:barber_booking_app/core/enums/app_enums.dart';
@@ -9,8 +10,12 @@ import 'package:barber_booking_app/presentation/blocs/auth/auth_cubit.dart';
 import 'package:barber_booking_app/presentation/pages/account/account_page.dart';
 
 void main() {
+  setUpAll(() {
+    GoogleFonts.config.allowRuntimeFetching = false;
+  });
+
   testWidgets(
-    'Kiểm thử luồng Đăng nhập, Lọc (Đánh giá + Khoảng cách 1-20km), Xoá lọc khi đổi tab Map/Home, Nút Back sau thanh toán (/my-bookings) và Đăng xuất',
+    'Kiểm thử Design System (Inter + ColorScheme), Trang cá nhân theo từng user (3 chấm Sửa/Xoá), Quản lý dịch vụ Manager, Bộ lọc và Đăng xuất',
     (WidgetTester tester) async {
       await initDependencies();
       await tester.pumpWidget(const BarberSmartApp());
@@ -26,9 +31,9 @@ void main() {
         const AuthState(
           status: AuthStatus.authenticated,
           user: UserEntity(
-            id: 'test-user-001',
-            fullName: 'Khách Kiểm Thử',
-            email: 'test@barbersmart.vn',
+            id: 'user-customer-1',
+            fullName: 'Nguyễn Tuấn Anh',
+            email: 'customer@barbersmart.vn',
             phone: '0901234567',
             role: UserRole.user,
           ),
@@ -56,48 +61,47 @@ void main() {
         await tester.pump(const Duration(milliseconds: 150));
       }
 
-      // 4. Chuyển sang Bản đồ, gõ tìm "liem", sau đó bấm về Trang chủ -> phải tự xoá filter
-      await tester.tap(find.text('Bản đồ'));
-      for (int i = 0; i < 4; i++) {
-        await tester.pump(const Duration(milliseconds: 150));
-      }
-      final mapSearchField = find.widgetWithText(
-        TextField,
-        'Tìm quán trên bản đồ...',
-      );
-      expect(mapSearchField, findsOneWidget);
-      await tester.enterText(mapSearchField, 'liem');
-      for (int i = 0; i < 4; i++) {
-        await tester.pump(const Duration(milliseconds: 150));
-      }
-
-      await tester.tap(find.text('Trang chủ'));
-      for (int i = 0; i < 5; i++) {
-        await tester.pump(const Duration(milliseconds: 150));
-      }
-      final TextField clearedMapField = tester.widget(
-        find.widgetWithText(TextField, 'Tìm quán trên bản đồ...').evaluate().isNotEmpty
-            ? find.widgetWithText(TextField, 'Tìm quán trên bản đồ...')
-            : find.byType(TextField).first,
-      );
-      expect(clearedMapField.controller?.text ?? '', isEmpty);
-
-      // 5. Giả lập sau khi thanh toán gọi context.go('/my-bookings') -> phải có nút Back quay về Home
+      // 4. Mở Trang cá nhân (/profile-social) -> kiểm tra chỉ hiển thị bài đăng của user hiện tại và có nút 3 chấm
       final navContext = tester.element(find.text('BARBERSMART').first);
-      GoRouter.of(navContext).go('/my-bookings');
+      GoRouter.of(navContext).go('/profile-social');
+      for (int i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 150));
+      }
+      expect(find.text('Đăng bài mới'), findsOneWidget);
+      expect(find.byIcon(Icons.more_horiz_rounded), findsWidgets);
+
+      // Quay về Trang chủ
+      GoRouter.of(navContext).go('/');
       for (int i = 0; i < 5; i++) {
         await tester.pump(const Duration(milliseconds: 150));
       }
-      expect(find.text('Lịch đã đặt'), findsOneWidget);
-      expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.arrow_back_rounded));
-      for (int i = 0; i < 5; i++) {
+      // 5. Chuyển sang Role MANAGER -> kiểm tra tab Quản lý có mục "Quản lý dịch vụ" riêng biệt
+      authCubit.emit(
+        const AuthState(
+          status: AuthStatus.authenticated,
+          user: UserEntity(
+            id: 'user-manager-1',
+            fullName: 'Trần Minh Quân (Owner)',
+            email: 'manager@barbersmart.vn',
+            phone: '0912345678',
+            role: UserRole.manager,
+          ),
+        ),
+      );
+      for (int i = 0; i < 6; i++) {
         await tester.pump(const Duration(milliseconds: 150));
       }
-      expect(find.text('Hồ Sơ'), findsOneWidget);
+      await tester.tap(find.text('Quản lý'));
+      for (int i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 150));
+      }
+      expect(find.text('Quản lý thông tin'), findsOneWidget);
+      expect(find.text('Quản lý dịch vụ'), findsOneWidget);
+      expect(find.text('Quản lý barber'), findsOneWidget);
+      expect(find.text('Doanh thu và lương'), findsOneWidget);
 
-      // 6. Mở tab Hồ Sơ, cuộn xuống và bấm Đăng xuất -> về thẳng /login không trắng màn hình
+      // 6. Mở tab Hồ Sơ, cuộn xuống và bấm Đăng xuất -> về thẳng /login
       await tester.tap(find.text('Hồ Sơ'));
       for (int i = 0; i < 4; i++) {
         await tester.pump(const Duration(milliseconds: 150));

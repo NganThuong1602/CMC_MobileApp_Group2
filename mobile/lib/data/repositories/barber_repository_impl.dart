@@ -116,7 +116,7 @@ class BarberRepositoryImpl implements BarberRepository {
     required int baseSalary,
   }) async {
     try {
-      await remote.inviteBarber(emailOrPhone);
+      await remote.inviteBarber(emailOrPhone, baseSalary: baseSalary);
       return Result.success(null);
     } on DioException catch (e) {
       if (e.response != null) {
@@ -205,7 +205,14 @@ class BarberRepositoryImpl implements BarberRepository {
 
     final nIdx = db.notifications.indexWhere((n) => n.id == notificationId);
     if (nIdx != -1) {
-      db.notifications[nIdx] = db.notifications[nIdx].copyWith(isRead: true);
+      db.notifications[nIdx] = db.notifications[nIdx].copyWith(
+        isRead: true,
+        payload: {
+          ...?db.notifications[nIdx].payload,
+          'responded': true,
+          'accepted': accept,
+        },
+      );
     }
 
     final uIdx = db.users.indexWhere((u) => u.id == userId);
@@ -270,6 +277,45 @@ class BarberRepositoryImpl implements BarberRepository {
     final updated = db.barbers[idx].copyWith(baseSalary: baseSalary);
     db.barbers[idx] = updated;
     return Result.success(updated);
+  }
+
+  @override
+  Future<Result<void>> removeBarberFromShop({
+    required String barberId,
+  }) async {
+    try {
+      await remote.removeBarber(barberId);
+      db.barbers.removeWhere((b) => b.id == barberId);
+      return Result.success(null);
+    } on DioException catch (e) {
+      if (e.response != null) {
+        return Result.failure(
+          ValidationFailure(_extractDioError(e, 'Không thể xoá Barber')),
+        );
+      }
+    } catch (_) {}
+
+    final idx = db.barbers.indexWhere((b) => b.id == barberId);
+    if (idx != -1) {
+      final removed = db.barbers.removeAt(idx);
+      final uIdx = db.users.indexWhere((u) => u.id == removed.userId);
+      if (uIdx != -1) {
+        db.users[uIdx] = db.users[uIdx].copyWith(role: UserRole.user);
+      }
+      db.notifications.insert(
+        0,
+        AppNotificationEntity(
+          id: 'notif_rm_${DateTime.now().millisecondsSinceEpoch}',
+          userId: removed.userId,
+          title: 'Thông báo từ quán cắt tóc',
+          body:
+              'Quản lý quán đã kết thúc hợp tác Barber với tài khoản của bạn.',
+          type: NotificationType.system,
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+    return Result.success(null);
   }
 
   @override

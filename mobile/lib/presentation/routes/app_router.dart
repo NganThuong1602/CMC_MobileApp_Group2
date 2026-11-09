@@ -34,7 +34,7 @@ class AppRouter {
 
   static GoRouter createRouter(AuthCubit authCubit) {
     return GoRouter(
-      initialLocation: '/login',
+      initialLocation: authCubit.state.isAuthenticated ? '/' : '/login',
       refreshListenable: GoRouterRefreshStream(authCubit.stream),
       redirect: (context, state) {
         final loggedIn = authCubit.state.isAuthenticated;
@@ -64,7 +64,23 @@ class AppRouter {
         ),
         GoRoute(
           path: '/',
-          builder: (context, state) => const MainShellPage(),
+          builder: (context, state) {
+            final tabParam = int.tryParse(
+              state.uri.queryParameters['tab'] ?? '',
+            );
+            final openConsult =
+                state.uri.queryParameters['openConsult'] == '1';
+            final roomId = state.uri.queryParameters['roomId'];
+            final customerHint = state.uri.queryParameters['customerHint'];
+            final requestToken = state.uri.queryParameters['ts'];
+            return MainShellPage(
+              requestedTabIndex: tabParam,
+              openCustomerConsult: openConsult,
+              initialChatRoomId: roomId,
+              initialCustomerHint: customerHint,
+              navigationToken: requestToken,
+            );
+          },
           routes: [
             GoRoute(
               path: 'booking/:shopId',
@@ -91,7 +107,10 @@ class AppRouter {
             ),
             GoRoute(
               path: 'profile-social',
-              builder: (context, state) => const ProfileSocialPage(),
+              builder: (context, state) {
+                final targetUserId = state.uri.queryParameters['userId'];
+                return ProfileSocialPage(targetUserId: targetUserId);
+              },
             ),
             GoRoute(
               path: 'chat/:roomId',

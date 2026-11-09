@@ -5,6 +5,25 @@ class AppFormatters {
 
   static final NumberFormat _vndFormat = NumberFormat('#,###', 'vi_VN');
 
+  /// Danh sách 28 đầu số nhà mạng Việt Nam hợp lệ (3 chữ số đầu) và bắt buộc đúng 10 chữ số:
+  /// 032, 033, 034, 035, 036, 037, 038, 039, 086, 096, 097, 098,
+  /// 081, 082, 083, 084, 085, 088, 091, 094, 070, 076, 077, 078, 079, 089, 090, 093
+  static final RegExp vnPhoneRegex = RegExp(
+    r'^(032|033|034|035|036|037|038|039|086|096|097|098|081|082|083|084|085|088|091|094|070|076|077|078|079|089|090|093)\d{7}$',
+  );
+
+  static bool isValidVietnamPhone(String? raw) {
+    final cleaned = (raw ?? '').trim();
+    return vnPhoneRegex.hasMatch(cleaned);
+  }
+
+  static String? validateVietnamPhone(String? raw) {
+    if (!isValidVietnamPhone(raw)) {
+      return 'số điện thoại không đúng';
+    }
+    return null;
+  }
+
   static String formatVnd(int amount) {
     return '${_vndFormat.format(amount).replaceAll(',', '.')}đ';
   }
