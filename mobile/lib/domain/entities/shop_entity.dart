@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../core/enums/app_enums.dart';
 
 class ShopEntity extends Equatable {
   final String id;
@@ -21,6 +22,16 @@ class ShopEntity extends Equatable {
   final String ownerName;
   final String ownerPhone;
   final String ownerEmail;
+  final ShopPackagePlan? subscriptionPlan;
+  final bool isCooperation;
+  final DateTime? subscriptionExpiresAt;
+  final bool serverIsHighlighted;
+  final int activeDiscountPercent;
+  final String activeDiscountName;
+  final String activeDiscountCode;
+  final String paymentCode;
+  final int paymentAmount;
+  final DateTime? paidAt;
 
   const ShopEntity({
     required this.id,
@@ -43,10 +54,31 @@ class ShopEntity extends Equatable {
     this.ownerName = '',
     this.ownerPhone = '',
     this.ownerEmail = '',
+    this.subscriptionPlan,
+    this.isCooperation = false,
+    this.subscriptionExpiresAt,
+    this.serverIsHighlighted = false,
+    this.activeDiscountPercent = 0,
+    this.activeDiscountName = '',
+    this.activeDiscountCode = '',
+    this.paymentCode = '',
+    this.paymentAmount = 0,
+    this.paidAt,
   });
 
+  bool get hasRating => reviewCount > 0 && rating > 0;
+
   bool isHighlightedAt(DateTime now) {
-    return highlightExpiresAt != null && highlightExpiresAt!.isAfter(now);
+    return isCooperation ||
+        serverIsHighlighted ||
+        (highlightExpiresAt != null && highlightExpiresAt!.isAfter(now));
+  }
+
+  int discountedPriceOf(int originalPrice) {
+    if (activeDiscountPercent <= 0) return originalPrice;
+    return ((originalPrice * (100 - activeDiscountPercent)) / 100)
+        .round()
+        .clamp(0, originalPrice);
   }
 
   ShopEntity copyWith({
@@ -70,6 +102,16 @@ class ShopEntity extends Equatable {
     String? ownerName,
     String? ownerPhone,
     String? ownerEmail,
+    ShopPackagePlan? subscriptionPlan,
+    bool? isCooperation,
+    DateTime? subscriptionExpiresAt,
+    bool? serverIsHighlighted,
+    int? activeDiscountPercent,
+    String? activeDiscountName,
+    String? activeDiscountCode,
+    String? paymentCode,
+    int? paymentAmount,
+    DateTime? paidAt,
   }) {
     return ShopEntity(
       id: id ?? this.id,
@@ -92,6 +134,18 @@ class ShopEntity extends Equatable {
       ownerName: ownerName ?? this.ownerName,
       ownerPhone: ownerPhone ?? this.ownerPhone,
       ownerEmail: ownerEmail ?? this.ownerEmail,
+      subscriptionPlan: subscriptionPlan ?? this.subscriptionPlan,
+      isCooperation: isCooperation ?? this.isCooperation,
+      subscriptionExpiresAt:
+          subscriptionExpiresAt ?? this.subscriptionExpiresAt,
+      serverIsHighlighted: serverIsHighlighted ?? this.serverIsHighlighted,
+      activeDiscountPercent:
+          activeDiscountPercent ?? this.activeDiscountPercent,
+      activeDiscountName: activeDiscountName ?? this.activeDiscountName,
+      activeDiscountCode: activeDiscountCode ?? this.activeDiscountCode,
+      paymentCode: paymentCode ?? this.paymentCode,
+      paymentAmount: paymentAmount ?? this.paymentAmount,
+      paidAt: paidAt ?? this.paidAt,
     );
   }
 
@@ -117,5 +171,15 @@ class ShopEntity extends Equatable {
         ownerName,
         ownerPhone,
         ownerEmail,
+        subscriptionPlan,
+        isCooperation,
+        subscriptionExpiresAt,
+        serverIsHighlighted,
+        activeDiscountPercent,
+        activeDiscountName,
+        activeDiscountCode,
+        paymentCode,
+        paymentAmount,
+        paidAt,
       ];
 }

@@ -20,7 +20,9 @@ import { CurrentUser, JwtAuthGuard } from '../../common/auth.guards';
 import {
   BarberEntity,
   BookingEntity,
+  BookingShift,
   BookingStatus,
+  DiscountCodeEntity,
   NotificationType,
   PaymentMethod,
   ServiceEntity,
@@ -31,9 +33,9 @@ import { NotificationsService } from '../notifications/notifications.module';
 
 @Injectable()
 export class BookingsService {
-  private static readonly STEP_MINUTES = 15; // Bước nhảy 15 phút theo Clarification A2
-  private static readonly LUNCH_START = 11 * 60 + 30; // 11:30 (690p)
-  private static readonly LUNCH_END = 14 * 60; // 14:00 (840p)
+  private static readonly GAP_MINUTES = 5;
+  private static readonly MORNING_END = 12 * 60; // 12:00 (720p)
+  private static readonly AFTERNOON_START = 13 * 60 + 30; // 13:30 (810p)
 
   constructor(
     @InjectRepository(BookingEntity)
@@ -44,6 +46,8 @@ export class BookingsService {
     private readonly barberRepo: Repository<BarberEntity>,
     @InjectRepository(ServiceEntity)
     private readonly serviceRepo: Repository<ServiceEntity>,
+    @InjectRepository(DiscountCodeEntity)
+    private readonly discountRepo: Repository<DiscountCodeEntity>,
     private readonly notificationsService: NotificationsService,
   ) {}
 
@@ -62,13 +66,74 @@ export class BookingsService {
     return `${h}:${m}`;
   }
 
+  private async getActiveCooperationDiscount(shop: ShopEntity): Promise<number> {
+    if (!shop.isCooperation || !shop.isActive) return 0;
+    const now = new Date();
+    const discounts = await this.discountRepo.find({ where: { isActive: true } });
+    let best = 0;
+    for (const d of discounts) {
+      if (new Date(d.startAt) <= now && now <= new Date(d.endAt)) {
+        if (d.discountPercent > best) {
+          best = d.discountPercent;
+        }
+      }
+    }
+    return Math.min(90, Math.max(0, best));
+  }
+
+  private computeShiftAllocation(params: {
+    shift: BookingShift;
+    shiftStart: number;
+    shiftEnd: number;
+    durationMinutes: number;
+    activeBookings: BookingEntity[];
+  }) {
+    const { shift, shiftStart, shiftEnd, durationMinutes, activeBookings } = params;
+    const shiftBookings = activeBookings.filter((b) => {
+      if (b.shift) return b.shift === shift;
+      return shift === BookingShift.MORNING
+        ? b.endMinutes <= BookingsService.MORNING_END
+        : b.startMinutes >= BookingsService.AFTERNOON_START;
+    });
+
+    const maxEnd =
+      shiftBookings.length === 0
+        ? null
+        : Math.max(...shiftBookings.map((b) => b.endMinutes));
+
+    const startMinutes =
+      maxEnd === null
+        ? shiftStart
+        : Math.max(shiftStart, maxEnd + BookingsService.GAP_MINUTES);
+    const endMinutes = startMinutes + durationMinutes;
+    const isAvailable =
+      shiftStart < shiftEnd && durationMinutes > 0 && endMinutes <= shiftEnd;
+
+    let disabledReason: string | null = null;
+    if (!isAvailable) {
+      disabledReason = `Ca này không còn đủ ${durationMinutes} phút trống trước ${this.formatHhMm(shiftEnd)}`;
+    }
+
+    return {
+      shift,
+      label: shift === BookingShift.MORNING ? 'Ca sáng' : 'Ca chiều',
+      shiftRange: `${this.formatHhMm(shiftStart)} - ${this.formatHhMm(shiftEnd)}`,
+      startMinutes,
+      endMinutes,
+      assignedRange: isAvailable
+        ? `${this.formatHhMm(startMinutes)} - ${this.formatHhMm(endMinutes)}`
+        : null,
+      bookedCount: shiftBookings.length,
+      isAvailable,
+      disabledReason,
+    };
+  }
+
   /**
-   * Core Booking Slot Engine (Clarification A2):
-   * - Bước nhảy mỗi 15 phút.
-   * - Ca sáng: từ giờ mở cửa quán -> 11:30. Nếu start + duration > 11:30 -> Disable (Chặn tràn giờ)!
-   * - Nghỉ trưa cố định: 11:30 - 14:00.
-   * - Ca chiều: từ 14:00 -> giờ đóng cửa quán. Nếu start + duration > closeTime -> Disable (Chặn tràn giờ)!
-   * - Đã có khách đặt (chồng lấn khoảng [start, start + duration)) -> Chuyển màu xám & Disable!
+   * Core Shift Auto-Scheduling Engine:
+   * - Ca sáng: từ giờ mở cửa quán -> 12:00.
+   * - Ca chiều: từ 13:30 -> giờ đóng cửa quán.
+   * - Khách đầu tiên của ca bắt đầu ngay đầu ca; khách tiếp theo tự động xếp sau khách trước + 5 phút.
    */
   async getAvailableSlots(params: {
     shopId: string;
@@ -81,7 +146,7 @@ export class BookingsService {
 
     const openMin = this.parseHhMm(shop.openTime, 8 * 60 + 30);
     const closeMin = this.parseHhMm(shop.closeTime, 20 * 60 + 30);
-    const duration = Math.max(params.durationMinutes || 15, 15);
+    const duration = Math.max(params.durationMinutes || 15, 10);
 
     const activeBookings = await this.bookingRepo.find({
       where: {
@@ -91,74 +156,33 @@ export class BookingsService {
       },
     });
 
-    const buildShiftSlots = (shiftStart: number, shiftEnd: number, shiftName: string) => {
-      const slots: Array<{
-        startMinutes: number;
-        endMinutes: number;
-        label: string;
-        allocatedRange: string;
-        isBooked: boolean;
-        isOverflow: boolean;
-        isSelectable: boolean;
-        disabledReason: string | null;
-      }> = [];
+    const morningStart = Math.min(openMin, BookingsService.MORNING_END);
+    const afternoonEnd = Math.max(closeMin, BookingsService.AFTERNOON_START);
 
-      for (
-        let start = shiftStart;
-        start < shiftEnd;
-        start += BookingsService.STEP_MINUTES
-      ) {
-        const end = start + duration;
-        const directlyBooked = activeBookings.some(
-          (b) => start >= b.startMinutes && start < b.endMinutes,
-        );
-        const overlapsExisting = activeBookings.some(
-          (b) => start < b.endMinutes && end > b.startMinutes,
-        );
-        const isOverflow = end > shiftEnd;
+    const morning = this.computeShiftAllocation({
+      shift: BookingShift.MORNING,
+      shiftStart: morningStart,
+      shiftEnd: BookingsService.MORNING_END,
+      durationMinutes: duration,
+      activeBookings,
+    });
 
-        let disabledReason: string | null = null;
-        if (directlyBooked) {
-          disabledReason = 'Khung giờ đã có khách đặt';
-        } else if (isOverflow) {
-          disabledReason = `Lấn qua giới hạn ${shiftName} (${this.formatHhMm(shiftEnd)})`;
-        } else if (overlapsExisting) {
-          disabledReason = `Không đủ ${duration} phút trống trước ca kế tiếp`;
-        }
-
-        slots.push({
-          startMinutes: start,
-          endMinutes: end,
-          label: this.formatHhMm(start),
-          allocatedRange: `${this.formatHhMm(start)} - ${this.formatHhMm(end)}`,
-          isBooked: directlyBooked || (!isOverflow && overlapsExisting),
-          isOverflow,
-          isSelectable: !directlyBooked && !overlapsExisting && !isOverflow,
-          disabledReason,
-        });
-      }
-      return slots;
-    };
-
-    const morningStart = Math.min(openMin, BookingsService.LUNCH_START);
-    const afternoonEnd = Math.max(closeMin, BookingsService.LUNCH_END);
+    const afternoon = this.computeShiftAllocation({
+      shift: BookingShift.AFTERNOON,
+      shiftStart: BookingsService.AFTERNOON_START,
+      shiftEnd: afternoonEnd,
+      durationMinutes: duration,
+      activeBookings,
+    });
 
     return {
       date: params.date,
       durationMinutes: duration,
-      stepMinutes: BookingsService.STEP_MINUTES,
-      morningRange: `${this.formatHhMm(morningStart)} - 11:30`,
-      afternoonRange: `14:00 - ${this.formatHhMm(afternoonEnd)}`,
-      morningSlots: buildShiftSlots(
-        morningStart,
-        BookingsService.LUNCH_START,
-        'ca sáng',
-      ),
-      afternoonSlots: buildShiftSlots(
-        BookingsService.LUNCH_END,
-        afternoonEnd,
-        'ca chiều',
-      ),
+      gapMinutes: BookingsService.GAP_MINUTES,
+      morningRange: morning.shiftRange,
+      afternoonRange: afternoon.shiftRange,
+      morning,
+      afternoon,
     };
   }
 
@@ -169,7 +193,8 @@ export class BookingsService {
       barberId: string;
       serviceIds: string[];
       bookingDate: string;
-      startMinutes: number;
+      shift?: BookingShift;
+      startMinutes?: number;
       paymentMethod: PaymentMethod;
     },
   ) {
@@ -196,26 +221,31 @@ export class BookingsService {
       (sum, s) => sum + s.durationMinutes,
       0,
     );
-    const totalPrice = services.reduce((sum, s) => sum + s.price, 0);
-    const start = dto.startMinutes;
-    const end = start + totalDurationMinutes;
+    const discountPercent = await this.getActiveCooperationDiscount(shop);
+    const rawTotalPrice = services.reduce((sum, s) => sum + s.price, 0);
+    const totalPrice =
+      discountPercent > 0
+        ? Math.max(0, Math.round((rawTotalPrice * (100 - discountPercent)) / 100))
+        : rawTotalPrice;
+
+    const targetShift =
+      dto.shift ??
+      (dto.startMinutes !== undefined &&
+      dto.startMinutes >= BookingsService.AFTERNOON_START
+        ? BookingShift.AFTERNOON
+        : BookingShift.MORNING);
 
     const openMin = this.parseHhMm(shop.openTime, 8 * 60 + 30);
     const closeMin = this.parseHhMm(shop.closeTime, 20 * 60 + 30);
+    const shiftStart =
+      targetShift === BookingShift.MORNING
+        ? Math.min(openMin, BookingsService.MORNING_END)
+        : BookingsService.AFTERNOON_START;
+    const shiftEnd =
+      targetShift === BookingShift.MORNING
+        ? BookingsService.MORNING_END
+        : Math.max(closeMin, BookingsService.AFTERNOON_START);
 
-    // Kiểm tra chặn tràn giờ Ca sáng & Ca chiều
-    const inMorning =
-      start >= openMin && end <= BookingsService.LUNCH_START;
-    const inAfternoon =
-      start >= BookingsService.LUNCH_END && end <= closeMin;
-
-    if (!inMorning && !inAfternoon) {
-      throw new BadRequestException(
-        'Khung giờ đã chọn bị tràn qua giờ nghỉ trưa (11:30) hoặc giờ đóng cửa quán!',
-      );
-    }
-
-    // Kiểm tra va chạm lịch đặt
     const existing = await this.bookingRepo.find({
       where: {
         barberId: dto.barberId,
@@ -223,14 +253,24 @@ export class BookingsService {
         status: Not(BookingStatus.CANCELLED),
       },
     });
-    const hasConflict = existing.some(
-      (b) => start < b.endMinutes && end > b.startMinutes,
-    );
-    if (hasConflict) {
+
+    const allocation = this.computeShiftAllocation({
+      shift: targetShift,
+      shiftStart,
+      shiftEnd,
+      durationMinutes: totalDurationMinutes,
+      activeBookings: existing,
+    });
+
+    if (!allocation.isAvailable) {
       throw new ConflictException(
-        'Khung giờ này vừa có khách hàng khác đặt. Vui lòng chọn khung giờ khác!',
+        allocation.disabledReason ??
+          'Ca làm việc đã đầy lịch. Vui lòng chọn ca hoặc ngày khác!',
       );
     }
+
+    const start = allocation.startMinutes;
+    const end = allocation.endMinutes;
 
     const status =
       dto.paymentMethod === PaymentMethod.SEPAY_QR
@@ -245,12 +285,16 @@ export class BookingsService {
         bookingDate: dto.bookingDate,
         startMinutes: start,
         endMinutes: end,
+        shift: targetShift,
         totalDurationMinutes,
         totalPrice,
         servicesSnapshot: services.map((s) => ({
           id: s.id,
           name: s.name,
-          price: s.price,
+          price:
+            discountPercent > 0
+              ? Math.max(0, Math.round((s.price * (100 - discountPercent)) / 100))
+              : s.price,
           durationMinutes: s.durationMinutes,
         })),
         paymentMethod: dto.paymentMethod,
@@ -261,7 +305,7 @@ export class BookingsService {
 
     await this.notificationsService.createAndPush({
       recipientId: barber.userId,
-      title: `Lịch đặt mới (${this.formatHhMm(start)} - ${this.formatHhMm(end)})`,
+      title: `Lịch đặt mới (${allocation.label}: ${this.formatHhMm(start)} - ${this.formatHhMm(end)})`,
       body: `Bạn có khách đặt lịch ngày ${dto.bookingDate} tại ${shop.name}.`,
       type: NotificationType.BOOKING,
       metadata: { bookingId: saved.id },
@@ -345,7 +389,8 @@ export class BookingsController {
       barberId: string;
       serviceIds: string[];
       bookingDate: string;
-      startMinutes: number;
+      shift?: BookingShift;
+      startMinutes?: number;
       paymentMethod: PaymentMethod;
     },
   ) {
@@ -378,6 +423,7 @@ export class BookingsController {
       ShopEntity,
       BarberEntity,
       ServiceEntity,
+      DiscountCodeEntity,
     ]),
   ],
   controllers: [BookingsController],

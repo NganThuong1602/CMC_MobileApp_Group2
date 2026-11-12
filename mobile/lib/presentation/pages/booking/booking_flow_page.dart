@@ -140,13 +140,11 @@ class _BookingFlowView extends StatelessWidget {
                     const SizedBox(height: 20),
                     _buildSectionTitle(
                       context,
-                      '3. Chọn Ngày & Khung giờ còn trống',
+                      '3. Chọn Ngày & Ca cắt tóc',
                     ),
                     const SizedBox(height: 10),
                     _buildHorizontalDateStrip(context, state),
                     const SizedBox(height: 14),
-                    _buildSlotLegend(context),
-                    const SizedBox(height: 12),
                     _buildTwoRowContinuousTimeline(context, state),
                     const SizedBox(height: 20),
                     _buildSectionTitle(context, '4. Phương thức thanh toán'),
@@ -174,17 +172,34 @@ class _BookingFlowView extends StatelessWidget {
                           'Tổng cộng (${state.totalDurationMinutes} phút)',
                           style: tt.bodySmallMuted,
                         ),
-                        Text(
-                          AppFormatters.formatVnd(state.totalPrice),
-                          style: tt.priceLargePrimary,
-                        ),
+                        if ((state.shop?.activeDiscountPercent ?? 0) > 0 &&
+                            state.rawTotalPrice > state.totalPrice)
+                          Row(
+                            children: [
+                              Text(
+                                AppFormatters.formatVnd(state.rawTotalPrice),
+                                style: tt.priceStrikethrough,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                AppFormatters.formatVnd(state.totalPrice),
+                                style: tt.priceLargePrimary,
+                              ),
+                            ],
+                          )
+                        else
+                          Text(
+                            AppFormatters.formatVnd(state.totalPrice),
+                            style: tt.priceLargePrimary,
+                          ),
                       ],
                     ),
                   ),
                   ElevatedButton(
                     onPressed: (state.isLoading ||
                             user == null ||
-                            state.selectedSlot == null ||
+                            (state.selectedShift == null &&
+                                state.selectedSlot == null) ||
                             state.selectedServices.isEmpty)
                         ? null
                         : () {
@@ -283,32 +298,59 @@ class _BookingFlowView extends StatelessWidget {
   Widget _buildServiceMultiSelector(BuildContext context, BookingState state) {
     final cs = context.colorScheme;
     final tt = context.appTextStyles;
+    final discountPct = state.shop?.activeDiscountPercent ?? 0;
 
     return Column(
       children: state.services.map((service) {
         final checked =
             state.selectedServices.any((s) => s.id == service.id);
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(
+        final discountedPrice =
+            state.shop?.discountedPriceOf(service.price) ?? service.price;
+        final hasDiscount = discountPct > 0 && discountedPrice < service.price;
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Material(
             color: cs.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: checked ? cs.primary : cs.outline,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                color: checked ? cs.primary : cs.outline,
+              ),
             ),
-          ),
-          child: CheckboxListTile(
-            value: checked,
-            activeColor: cs.primary,
-            onChanged: (_) =>
-                context.read<BookingBloc>().add(BookingServiceToggled(service)),
-            title: Text(
-              service.name,
-              style: tt.bodyStrong,
-            ),
-            subtitle: Text(
-              '${service.durationMinutes} phút • ${AppFormatters.formatVnd(service.price)}',
-              style: tt.bodySmallMuted,
+            clipBehavior: Clip.antiAlias,
+            child: CheckboxListTile(
+              value: checked,
+              activeColor: cs.primary,
+              onChanged: (_) => context
+                  .read<BookingBloc>()
+                  .add(BookingServiceToggled(service)),
+              title: Text(
+                service.name,
+                style: tt.bodyStrong,
+              ),
+              subtitle: hasDiscount
+                  ? Row(
+                      children: [
+                        Text(
+                          '${service.durationMinutes} phút • ',
+                          style: tt.bodySmallMuted,
+                        ),
+                        Text(
+                          AppFormatters.formatVnd(service.price),
+                          style: tt.priceStrikethrough,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          AppFormatters.formatVnd(discountedPrice),
+                          style: tt.bodySmallPrimary,
+                        ),
+                      ],
+                    )
+                  : Text(
+                      '${service.durationMinutes} phút • ${AppFormatters.formatVnd(service.price)}',
+                      style: tt.bodySmallMuted,
+                    ),
             ),
           ),
         );
@@ -396,47 +438,6 @@ class _BookingFlowView extends StatelessWidget {
     );
   }
 
-  Widget _buildSlotLegend(BuildContext context) {
-    final cs = context.colorScheme;
-    return Wrap(
-      spacing: 14,
-      runSpacing: 6,
-      children: [
-        _legendDot(context, cs.surface, 'Còn trống', border: cs.primary),
-        _legendDot(context, cs.primary, 'Đang chọn'),
-        _legendDot(context, cs.surfaceContainerHighest, 'Đã có người đặt'),
-        _legendDot(context, cs.errorContainer, 'Khóa do tràn giờ'),
-      ],
-    );
-  }
-
-  Widget _legendDot(
-    BuildContext context,
-    Color bg,
-    String text, {
-    Color? border,
-  }) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 13,
-          height: 13,
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: border ?? AppTheme.transparent),
-          ),
-        ),
-        const SizedBox(width: 5),
-        Text(
-          text,
-          style: context.appTextStyles.captionMuted,
-        ),
-      ],
-    );
-  }
-
   Widget _buildTwoRowContinuousTimeline(
     BuildContext context,
     BookingState state,
@@ -449,8 +450,18 @@ class _BookingFlowView extends StatelessWidget {
     if (schedule == null) {
       return const SizedBox.shrink();
     }
-    final openStr = state.shop?.openTime ?? '08:30';
-    final closeStr = state.shop?.closeTime ?? '20:30';
+
+    final shifts = [
+      if (schedule.morningShift != null) schedule.morningShift!,
+      if (schedule.afternoonShift != null) schedule.afternoonShift!,
+    ];
+
+    if (shifts.isEmpty) {
+      return Text(
+        'Quán hiện chưa mở ca nào trong ngày đã chọn.',
+        style: tt.bodyMuted,
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -462,44 +473,33 @@ class _BookingFlowView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Ca sáng ($openStr - 11:30)',
-            style: tt.bodyStrong,
-          ),
-          const SizedBox(height: 8),
-          _buildContinuousShiftRow(context, state, schedule.morningSlots),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Row(
-              children: [
-                const Expanded(child: Divider()),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    'Nghỉ trưa cố định: 11:30 - 14:00',
-                    style: tt.captionMuted,
+          Row(
+            children: shifts
+                .map(
+                  (opt) => Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        right: opt == shifts.first && shifts.length > 1 ? 8 : 0,
+                        left: opt == shifts.last && shifts.length > 1 ? 2 : 0,
+                      ),
+                      child: _buildShiftCard(context, state, opt),
+                    ),
                   ),
-                ),
-                const Expanded(child: Divider()),
-              ],
-            ),
+                )
+                .toList(),
           ),
-          Text(
-            'Ca chiều (14:00 - $closeStr)',
-            style: tt.bodyStrong,
-          ),
-          const SizedBox(height: 8),
-          _buildContinuousShiftRow(context, state, schedule.afternoonSlots),
-          if (state.selectedSlot != null) ...[
+          if (state.selectedShift != null &&
+              state.selectedShift!.assignedRangeLabel != null) ...[
             const SizedBox(height: 12),
             Container(
+              width: double.infinity,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: cs.primaryContainer,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                'Khung giờ phục vụ dự kiến: ${state.selectedSlot!.allocatedRangeLabel} (${state.totalDurationMinutes} phút)',
+                'Hệ thống tự xếp khung giờ: ${state.selectedShift!.assignedRangeLabel} (${state.totalDurationMinutes} phút)',
                 style: tt.bodySmallPrimary,
               ),
             ),
@@ -509,98 +509,117 @@ class _BookingFlowView extends StatelessWidget {
     );
   }
 
-  Widget _buildContinuousShiftRow(
+  Widget _buildShiftCard(
     BuildContext context,
     BookingState state,
-    List<TimeSlotEntity> slots,
+    ShiftOptionEntity option,
   ) {
     final cs = context.colorScheme;
     final tt = context.appTextStyles;
+    final isSelected = state.selectedShift?.shift == option.shift;
+    final isMorning = option.shift == BookingShift.morning;
 
-    return SizedBox(
-      height: 54,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: slots.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 6),
-        itemBuilder: (ctx, i) {
-          final slot = slots[i];
-          final isSelected =
-              state.selectedSlot?.startMinutes == slot.startMinutes;
+    final bgColor = !option.isAvailable
+        ? cs.surfaceContainerHighest
+        : (isSelected ? cs.primaryContainer : cs.surface);
+    final borderColor = !option.isAvailable
+        ? cs.outlineVariant
+        : (isSelected ? cs.primary : cs.outline);
 
-          Color bgColor = cs.surface;
-          Color borderColor = cs.primary.withValues(alpha: 0.55);
-          TextStyle timeStyle = tt.bodySmallStrong;
-          TextStyle statusStyle = tt.badgePrimary;
-          Color iconColor = cs.primary;
-
-          if (isSelected) {
-            bgColor = cs.primary;
-            borderColor = cs.primary;
-            timeStyle = tt.bodySmallOnPrimary;
-            statusStyle = tt.captionOnPrimary;
-            iconColor = cs.onPrimary;
-          } else if (slot.isBooked) {
-            bgColor = cs.surfaceContainerHighest;
-            borderColor = cs.outline;
-            timeStyle = tt.bodySmallMuted;
-            statusStyle = tt.captionMuted;
-            iconColor = cs.onSurfaceVariant;
-          } else if (slot.hasDurationConflict) {
-            bgColor = cs.errorContainer;
-            borderColor = cs.error.withValues(alpha: 0.35);
-            timeStyle = tt.bodySmallDanger;
-            statusStyle = tt.badgeDanger;
-            iconColor = cs.error;
-          }
-
-          return GestureDetector(
-            onTap: () {
-              if (!slot.isSelectable) {
-                if (slot.unavailableReason != null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      duration: const Duration(seconds: 2),
-                      content: Text(slot.unavailableReason!),
-                    ),
-                  );
-                }
-                return;
-              }
-              context.read<BookingBloc>().add(BookingSlotSelected(slot));
-            },
-            child: Container(
-              width: 72,
-              decoration: BoxDecoration(
-                color: bgColor,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: borderColor, width: 1.2),
+    return Material(
+      color: bgColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: borderColor,
+          width: isSelected ? 1.8 : 1,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () {
+          if (!option.isAvailable) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                duration: const Duration(seconds: 2),
+                content: Text(
+                  option.unavailableReason ??
+                      'Ca này đã hết chỗ, vui lòng chọn ca khác.',
+                ),
               ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+            );
+            return;
+          }
+          context.read<BookingBloc>().add(BookingShiftSelected(option));
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  Text(
-                    slot.timeLabel,
-                    style: timeStyle,
+                  Icon(
+                    isMorning
+                        ? Icons.wb_sunny_outlined
+                        : Icons.wb_twilight_rounded,
+                    size: 18,
+                    color: !option.isAvailable
+                        ? cs.onSurfaceVariant
+                        : cs.primary,
                   ),
-                  const SizedBox(height: 2),
-                  if (slot.isBooked)
-                    Text(
-                      'Đã đặt',
-                      style: statusStyle,
-                    )
-                  else if (slot.hasDurationConflict)
-                    Icon(Icons.lock_outline_rounded, size: 12, color: iconColor)
-                  else
-                    Text(
-                      'Trống',
-                      style: statusStyle,
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      option.label,
+                      style: !option.isAvailable
+                          ? tt.bodySmallMuted
+                          : tt.cardTitle,
                     ),
+                  ),
                 ],
               ),
-            ),
-          );
-        },
+              const SizedBox(height: 6),
+              Text(
+                option.shiftRangeLabel,
+                style: tt.captionMuted,
+              ),
+              const SizedBox(height: 8),
+              if (option.isAvailable)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isSelected ? cs.primary : cs.secondaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    option.assignedRangeLabel != null
+                        ? 'Dự kiến: ${option.assignedRangeLabel}'
+                        : 'Còn chỗ (${option.bookedCount} lượt)',
+                    style: isSelected ? tt.badgeOnPrimary : tt.badgePrimary,
+                  ),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: cs.errorContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'Hết chỗ trong ca',
+                    style: tt.badgeDanger,
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -612,34 +631,37 @@ class _BookingFlowView extends StatelessWidget {
     return Column(
       children: PaymentMethod.values.map((m) {
         final selected = state.paymentMethod == m;
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Material(
             color: cs.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected ? cs.primary : cs.outline,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                color: selected ? cs.primary : cs.outline,
+              ),
             ),
-          ),
-          child: ListTile(
-            onTap: () => context
-                .read<BookingBloc>()
-                .add(BookingPaymentMethodChanged(m)),
-            leading: Icon(
-              selected
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.radio_button_off_rounded,
-              color: selected ? cs.primary : cs.onSurfaceVariant,
-            ),
-            title: Text(
-              m.label,
-              style: tt.bodyStrong,
-            ),
-            subtitle: Text(
-              m == PaymentMethod.qrCode
-                  ? 'Tạo mã VietQR động, SePay tự động xác nhận Hoàn thành qua Socket.IO'
-                  : 'Thanh toán trực tiếp cho Barber sau khi cắt xong',
-              style: tt.bodySmallMuted,
+            clipBehavior: Clip.antiAlias,
+            child: ListTile(
+              onTap: () => context
+                  .read<BookingBloc>()
+                  .add(BookingPaymentMethodChanged(m)),
+              leading: Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_off_rounded,
+                color: selected ? cs.primary : cs.onSurfaceVariant,
+              ),
+              title: Text(
+                m.label,
+                style: tt.bodyStrong,
+              ),
+              subtitle: Text(
+                m == PaymentMethod.qrCode
+                    ? 'Tạo mã VietQR động, SePay tự động xác nhận Hoàn thành qua Socket.IO'
+                    : 'Thanh toán trực tiếp cho Barber sau khi cắt xong',
+                style: tt.bodySmallMuted,
+              ),
             ),
           ),
         );

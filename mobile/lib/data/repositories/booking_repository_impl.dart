@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/enums/app_enums.dart';
 import '../../core/error/failures.dart';
 import '../../core/services/booking_slot_calculator.dart';
@@ -56,6 +57,27 @@ class BookingRepositoryImpl implements BookingRepository {
     }).toList();
   }
 
+  ShiftOptionEntity? _mapRemoteShift(
+    dynamic raw,
+    BookingShift fallbackShift,
+  ) {
+    if (raw is! Map) return null;
+    final map = Map<String, dynamic>.from(raw);
+    final parsedShift =
+        BookingShift.fromApi(map['shift']?.toString()) ?? fallbackShift;
+    return ShiftOptionEntity(
+      shift: parsedShift,
+      label: (map['label'] ?? parsedShift.label).toString(),
+      shiftRangeLabel: (map['shiftRange'] ?? '').toString(),
+      startMinutes: (map['startMinutes'] as num?)?.toInt() ?? 0,
+      endMinutes: (map['endMinutes'] as num?)?.toInt() ?? 0,
+      assignedRangeLabel: map['assignedRange']?.toString(),
+      bookedCount: (map['bookedCount'] as num?)?.toInt() ?? 0,
+      isAvailable: map['isAvailable'] == true,
+      unavailableReason: map['disabledReason']?.toString(),
+    );
+  }
+
   @override
   Future<Result<DaySlotSchedule>> getDaySlotSchedule({
     required String shopId,
@@ -71,6 +93,14 @@ class BookingRepositoryImpl implements BookingRepository {
         dateStr: _formatDateYyyyMmDd(date),
         durationMinutes: totalDurationMinutes,
       );
+      final morningShift = _mapRemoteShift(
+        map['morning'],
+        BookingShift.morning,
+      );
+      final afternoonShift = _mapRemoteShift(
+        map['afternoon'],
+        BookingShift.afternoon,
+      );
       final morning = _mapRemoteSlots(
         (map['morningSlots'] as List?) ?? const [],
         true,
@@ -85,6 +115,8 @@ class BookingRepositoryImpl implements BookingRepository {
           totalDurationMinutes: totalDurationMinutes,
           morningSlots: morning,
           afternoonSlots: afternoon,
+          morningShift: morningShift,
+          afternoonShift: afternoonShift,
         ),
       );
     } catch (_) {}
@@ -122,6 +154,7 @@ class BookingRepositoryImpl implements BookingRepository {
     required List<String> serviceIds,
     required DateTime date,
     required int startMinutes,
+    BookingShift? shift,
     required PaymentMethod paymentMethod,
   }) async {
     if (serviceIds.isEmpty) {
@@ -139,6 +172,7 @@ class BookingRepositoryImpl implements BookingRepository {
         bookingDate: _formatDateYyyyMmDd(date),
         startMinutes: startMinutes,
         paymentMethod: isQr ? 'SEPAY_QR' : 'CASH_AT_SHOP',
+        shift: shift?.apiValue,
       );
       db.bookings.removeWhere((b) => b.id == createdRemote.id);
       db.bookings.insert(0, createdRemote);
@@ -184,19 +218,54 @@ class BookingRepositoryImpl implements BookingRepository {
         .where((s) => s.shopId == shopId && serviceIds.contains(s.id))
         .toList();
 
-    final summary = calculator.calculateServicesSummary(selectedServices);
-    final endMinutes = startMinutes + summary.totalDurationMinutes;
-
+    final summary = calculator.calculateServicesSummary(
+      selectedServices,
+      discountPercent: shop.activeDiscountPercent,
+    );
     final openMins = AppFormatters.hhMmToMinutesFromMidnight(shop.openTime);
     final closeMins = AppFormatters.hhMmToMinutesFromMidnight(shop.closeTime);
+    var resolvedStart = startMinutes;
     final barberBookings =
         db.bookings.where((b) => b.barberId == barberId).toList();
+    if (shift != null) {
+      final dayBookings = barberBookings
+          .where((b) => b.status != BookingStatus.cancelled && b.isSameDay(date))
+          .toList();
+      final shiftStart = shift == BookingShift.morning
+          ? (openMins < AppConstants.morningShiftEndMinutes
+              ? openMins
+              : 8 * 60 + 30)
+          : AppConstants.afternoonShiftStartMinutes;
+      final shiftEnd = shift == BookingShift.morning
+          ? AppConstants.morningShiftEndMinutes
+          : (closeMins > AppConstants.afternoonShiftStartMinutes
+              ? closeMins
+              : 20 * 60 + 30);
+      final option = calculator.computeShiftOption(
+        shift: shift,
+        shiftStart: shiftStart,
+        shiftEnd: shiftEnd,
+        durationMinutes: summary.totalDurationMinutes,
+        dayBookings: dayBookings,
+      );
+      if (!option.isAvailable) {
+        return Result.failure(
+          ConflictFailure(
+            option.unavailableReason ??
+                'Ca này đã hết chỗ, vui lòng chọn ca khác!',
+          ),
+        );
+      }
+      resolvedStart = option.startMinutes;
+    }
+    final endMinutes = resolvedStart + summary.totalDurationMinutes;
+
     final barberLocks =
         db.slotLocks.where((l) => l.barberId == barberId).toList();
 
     final conflict = calculator.hasConflict(
       date: date,
-      startMinutes: startMinutes,
+      startMinutes: resolvedStart,
       endMinutes: endMinutes,
       shopOpenMinutes: openMins,
       shopCloseMinutes: closeMins,
@@ -209,7 +278,7 @@ class BookingRepositoryImpl implements BookingRepository {
     if (conflict) {
       return Result.failure(
         const ConflictFailure(
-          'Khung giờ này bị tràn ca hoặc vừa có người đặt trước. Vui lòng chọn mốc giờ khác!',
+          'Khung giờ này bị tràn ca hoặc vừa có người đặt trước. Vui lòng chọn ca khác!',
         ),
       );
     }
@@ -230,7 +299,7 @@ class BookingRepositoryImpl implements BookingRepository {
       customerPhone: customer.phone,
       services: selectedServices,
       date: DateTime(date.year, date.month, date.day),
-      startMinutes: startMinutes,
+      startMinutes: resolvedStart,
       endMinutes: endMinutes,
       totalPrice: summary.totalPrice,
       totalDurationMinutes: summary.totalDurationMinutes,
@@ -239,6 +308,7 @@ class BookingRepositoryImpl implements BookingRepository {
       isPaid: false,
       paymentCode: paymentCode,
       createdAt: DateTime.now(),
+      shift: shift,
     );
 
     db.bookings.insert(0, booking);

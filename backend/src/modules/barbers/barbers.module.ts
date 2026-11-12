@@ -190,6 +190,7 @@ export class BarbersService {
         shopId,
         baseSalary,
         isActive: true,
+        joinedAt: new Date(),
       }),
     );
 

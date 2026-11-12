@@ -14,7 +14,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { InjectRepository, TypeOrmModule } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { CurrentUser, JwtAuthGuard } from '../../common/auth.guards';
 import {
   BarberEntity,
@@ -27,6 +27,7 @@ import {
   ReviewEntity,
   ShopEntity,
   UserEntity,
+  UserRole,
 } from '../../database/entities';
 import { NotificationsService } from '../notifications/notifications.module';
 import { RealtimeGateway } from '../realtime/realtime.module';
@@ -81,6 +82,84 @@ export class CommunityService {
       order: { createdAt: 'DESC' },
       take: 40,
     });
+  }
+
+  /**
+   * Diễn đàn (thay cho Nổi bật):
+   * - Hiển thị bài đăng của tài khoản đang là BARBER (từ thời điểm trở thành Barber: post.createdAt >= barber.joinedAt)
+   *   VÀ bài đăng của tài khoản đang giữ role MANAGER (Chủ quán).
+   * - Sắp xếp theo thời gian mới nhất (createdAt DESC).
+   */
+  async getForumPosts() {
+    const [barbers, shops, managers] = await Promise.all([
+      this.barberRepo.find({
+        where: { isActive: true },
+        relations: ['shop', 'user'],
+      }),
+      this.shopRepo.find({
+        order: { isActive: 'DESC', createdAt: 'DESC' },
+      }),
+      this.userRepo.find({
+        where: { role: UserRole.MANAGER },
+      }),
+    ]);
+
+    const barberByUserId = new Map<string, BarberEntity>();
+    for (const b of barbers) {
+      if (b.user?.role === UserRole.BARBER) {
+        barberByUserId.set(b.userId, b);
+      }
+    }
+
+    const shopByOwnerId = new Map<string, ShopEntity>();
+    for (const shop of shops) {
+      if (!shopByOwnerId.has(shop.ownerId)) {
+        shopByOwnerId.set(shop.ownerId, shop);
+      }
+    }
+
+    const eligibleAuthorIds = Array.from(
+      new Set([
+        ...barberByUserId.keys(),
+        ...managers.map((m) => m.id),
+      ]),
+    );
+    if (eligibleAuthorIds.length === 0) return [];
+
+    const posts = await this.postRepo.find({
+      where: { authorId: In(eligibleAuthorIds) },
+      relations: ['author', 'comments', 'comments.author'],
+      order: { createdAt: 'DESC' },
+      take: 100,
+    });
+
+    return posts
+      .filter((post) => {
+        if (post.author?.role === UserRole.MANAGER) {
+          return true;
+        }
+        const barber = barberByUserId.get(post.authorId);
+        if (!barber) return false;
+        const since = barber.joinedAt ?? barber.createdAt;
+        return new Date(post.createdAt).getTime() >= new Date(since).getTime();
+      })
+      .slice(0, 60)
+      .map((post) => {
+        if (post.author?.role === UserRole.MANAGER) {
+          const ownedShop = shopByOwnerId.get(post.authorId);
+          return {
+            ...post,
+            authorShopId: ownedShop?.id ?? null,
+            authorShopName: ownedShop?.name ?? '',
+          };
+        }
+        const barber = barberByUserId.get(post.authorId);
+        return {
+          ...post,
+          authorShopId: barber?.shopId ?? null,
+          authorShopName: barber?.shop?.name ?? '',
+        };
+      });
   }
 
   async getUserPosts(userId: string) {
@@ -216,7 +295,9 @@ export class CommunityService {
 
     const allReviews = await this.reviewRepo.find({ where: { shopId } });
     const avg =
-      allReviews.reduce((s, r) => s + r.rating, 0) / allReviews.length;
+      allReviews.length > 0
+        ? allReviews.reduce((s, r) => s + r.rating, 0) / allReviews.length
+        : 0;
     await this.shopRepo.update(shopId, {
       rating: Number(avg.toFixed(1)),
       reviewCount: allReviews.length,
@@ -386,6 +467,11 @@ export class CommunityController {
   @Get('posts')
   getAllFeedPosts() {
     return this.service.getAllFeedPosts();
+  }
+
+  @Get('posts/forum')
+  getForumPosts() {
+    return this.service.getForumPosts();
   }
 
   @Get('posts/user/:userId')

@@ -4,6 +4,7 @@ import {
   ConflictException,
   Controller,
   ForbiddenException,
+  Get,
   Headers,
   Injectable,
   Logger,
@@ -24,7 +25,9 @@ import {
   HighlightPlan,
   NotificationType,
   ServiceEntity,
+  SHOP_PACKAGE_CONFIG,
   ShopEntity,
+  ShopPackagePlan,
   TransactionEntity,
   TransactionStatus,
   TransactionType,
@@ -69,6 +72,10 @@ export class PaymentsService implements OnModuleInit {
       for (const tx of pendingShopTxs) {
         if (handledUsers.has(tx.userId)) continue;
         handledUsers.add(tx.userId);
+        // Chỉ tự khôi phục giao dịch theo luồng cũ nếu đã kèm sẵn tên & địa chỉ quán
+        if (tx.metadataJson?.payFirst === true || !tx.metadataJson?.name) {
+          continue;
+        }
         const existingShop = await this.shopRepo.findOne({
           where: { ownerId: tx.userId },
         });
@@ -104,17 +111,55 @@ export class PaymentsService implements OnModuleInit {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
+  async getRegisterShopCredit(userId: string) {
+    const existingOwned = await this.shopRepo.findOne({
+      where: { ownerId: userId },
+    });
+    if (existingOwned) {
+      return { hasCredit: false };
+    }
+    const paidTxs = await this.txRepo.find({
+      where: {
+        userId,
+        type: TransactionType.REGISTER_SHOP,
+        status: TransactionStatus.SUCCESS,
+      },
+      order: { paidAt: 'DESC', createdAt: 'DESC' },
+    });
+    const unused = paidTxs.find(
+      (t) => !t.shopId && t.metadataJson?.consumed !== true,
+    );
+    if (!unused) {
+      return { hasCredit: false };
+    }
+    const plan =
+      unused.packagePlan ??
+      (unused.metadataJson?.packagePlan as ShopPackagePlan | undefined) ??
+      ShopPackagePlan.MEMBER_MONTHLY;
+    return {
+      hasCredit: true,
+      transactionId: unused.id,
+      paymentCode: unused.paymentCode,
+      packagePlan: plan,
+      amount: unused.amount,
+      paidAt: unused.paidAt,
+      packageMeta: SHOP_PACKAGE_CONFIG[plan] ?? null,
+    };
+  }
+
   /**
-   * 1. Tạo mã VietQR động 100.000đ để Đăng ký Quán (1 Manager tối đa 1 quán).
+   * 1. Tạo mã VietQR động để thanh toán Gói Đăng ký Quán (Thành viên 500k/5tr hoặc Hợp tác 300k/3tr)
+   * trước khi mở form nhập thông tin quán.
    */
   async createRegisterShopQr(
     user: UserEntity,
     dto: {
-      name: string;
-      address: string;
-      phone: string;
-      openTime: string;
-      closeTime: string;
+      packagePlan?: ShopPackagePlan;
+      name?: string;
+      address?: string;
+      phone?: string;
+      openTime?: string;
+      closeTime?: string;
       description?: string;
       coverUrl?: string;
       galleryUrls?: string[];
@@ -133,11 +178,6 @@ export class PaymentsService implements OnModuleInit {
       );
     }
 
-    const cleanPhone = (dto.phone ?? '').trim();
-    if (!VN_PHONE_REGEX.test(cleanPhone)) {
-      throw new BadRequestException('số điện thoại không đúng');
-    }
-
     const existingOwned = await this.shopRepo.findOne({
       where: { ownerId: user.id },
     });
@@ -149,15 +189,11 @@ export class PaymentsService implements OnModuleInit {
       );
     }
 
-    const dupName = await this.shopRepo.findOne({
-      where: { name: dto.name.trim() },
-    });
-    if (dupName) throw new ConflictException('Tên quán đã tồn tại');
-
-    const dupAddr = await this.shopRepo.findOne({
-      where: { address: dto.address.trim() },
-    });
-    if (dupAddr) throw new ConflictException('Địa chỉ quán đã được đăng ký');
+    const plan = dto.packagePlan ?? ShopPackagePlan.MEMBER_MONTHLY;
+    const pkgMeta = SHOP_PACKAGE_CONFIG[plan];
+    if (!pkgMeta) {
+      throw new BadRequestException('Gói đăng ký quán không hợp lệ');
+    }
 
     // Hủy các giao dịch chờ cũ chưa thanh toán của user này (nếu có)
     await this.txRepo.update(
@@ -172,8 +208,25 @@ export class PaymentsService implements OnModuleInit {
     const digits = this.randomDigits();
     const paymentCode = `PAYSHOP${digits}`;
     const transferContent = `PAY SHOP ${digits}`;
-    const amount = PaymentsService.SHOP_REG_FEE;
+    const amount = pkgMeta.price;
     const qrImageUrl = this.buildVietQrUrl(amount, transferContent);
+
+    // Luồng mới: thanh toán gói trước, sau khi webhook xác nhận mới nhập thông tin quán
+    const isLegacyDirectSubmit = Boolean(dto.name && dto.address && dto.phone);
+    if (isLegacyDirectSubmit) {
+      const cleanPhone = (dto.phone ?? '').trim();
+      if (!VN_PHONE_REGEX.test(cleanPhone)) {
+        throw new BadRequestException('số điện thoại không đúng');
+      }
+      const dupName = await this.shopRepo.findOne({
+        where: { name: dto.name!.trim() },
+      });
+      if (dupName) throw new ConflictException('Tên quán đã tồn tại');
+      const dupAddr = await this.shopRepo.findOne({
+        where: { address: dto.address!.trim() },
+      });
+      if (dupAddr) throw new ConflictException('Địa chỉ quán đã được đăng ký');
+    }
 
     return this.txRepo.save(
       this.txRepo.create({
@@ -181,14 +234,67 @@ export class PaymentsService implements OnModuleInit {
         transferContent,
         userId: user.id,
         type: TransactionType.REGISTER_SHOP,
+        packagePlan: plan,
         amount,
         qrImageUrl,
-        metadataJson: {
-          ...dto,
-          name: dto.name.trim(),
-          address: dto.address.trim(),
-          phone: cleanPhone,
-        },
+        metadataJson: isLegacyDirectSubmit
+          ? {
+              ...dto,
+              packagePlan: plan,
+              payFirst: false,
+              consumed: true,
+              name: dto.name!.trim(),
+              address: dto.address!.trim(),
+              phone: dto.phone!.trim(),
+            }
+          : {
+              packagePlan: plan,
+              payFirst: true,
+              consumed: false,
+            },
+      }),
+    );
+  }
+
+  /**
+   * Gia hạn / Nâng cấp gói quán bằng VietQR SePay (cho chủ quán hiện tại).
+   */
+  async createRenewShopQr(userId: string, plan: ShopPackagePlan) {
+    const shop = await this.shopRepo.findOne({ where: { ownerId: userId } });
+    if (!shop) {
+      throw new ForbiddenException('Bạn chưa sở hữu quán nào để gia hạn gói');
+    }
+    const pkgMeta = SHOP_PACKAGE_CONFIG[plan];
+    if (!pkgMeta) {
+      throw new BadRequestException('Gói gia hạn không hợp lệ');
+    }
+
+    await this.txRepo.update(
+      {
+        userId,
+        type: TransactionType.RENEW_SHOP,
+        status: TransactionStatus.PENDING,
+      },
+      { status: TransactionStatus.FAILED },
+    );
+
+    const digits = this.randomDigits();
+    const paymentCode = `PAYREN${digits}`;
+    const transferContent = `PAY RENEW ${digits}`;
+    const amount = pkgMeta.price;
+    const qrImageUrl = this.buildVietQrUrl(amount, transferContent);
+
+    return this.txRepo.save(
+      this.txRepo.create({
+        paymentCode,
+        transferContent,
+        userId,
+        shopId: shop.id,
+        type: TransactionType.RENEW_SHOP,
+        packagePlan: plan,
+        amount,
+        qrImageUrl,
+        metadataJson: { packagePlan: plan },
       }),
     );
   }
@@ -332,6 +438,47 @@ export class PaymentsService implements OnModuleInit {
 
     if (matchedTx.type === TransactionType.REGISTER_SHOP) {
       const meta = matchedTx.metadataJson ?? {};
+      const plan =
+        matchedTx.packagePlan ??
+        (meta.packagePlan as ShopPackagePlan | undefined) ??
+        ShopPackagePlan.MEMBER_MONTHLY;
+      const pkgMeta = SHOP_PACKAGE_CONFIG[plan];
+
+      if (meta.payFirst === true || !meta.name) {
+        matchedTx.metadataJson = {
+          ...meta,
+          packagePlan: plan,
+          payFirst: true,
+          consumed: false,
+        };
+        await this.txRepo.save(matchedTx);
+
+        this.realtimeGateway.emitPaymentSuccess(matchedTx.userId, {
+          transactionId: matchedTx.id,
+          paymentCode: matchedTx.paymentCode,
+          type: TransactionType.REGISTER_SHOP,
+          packagePlan: plan,
+          readyForShopForm: true,
+        });
+
+        await this.notificationsService.createAndPush({
+          recipientId: matchedTx.userId,
+          title: `Thanh toán ${pkgMeta.label} thành công`,
+          body: `Vui lòng hoàn tất thông tin chi tiết quán để gửi Admin xét duyệt.`,
+          type: NotificationType.PAYMENT_SUCCESS,
+          metadata: { paymentCode: matchedTx.paymentCode, packagePlan: plan },
+        });
+
+        return {
+          ...matchedTx,
+          success: true,
+          transactionId: matchedTx.id,
+          paymentCode: matchedTx.paymentCode,
+          packagePlan: plan,
+          readyForShopForm: true,
+        };
+      }
+
       let newShop = await this.shopRepo.findOne({
         where: { ownerId: matchedTx.userId },
       });
@@ -349,11 +496,14 @@ export class PaymentsService implements OnModuleInit {
             galleryUrls: meta.galleryUrls ?? [],
             latitude: meta.latitude ?? 20.9768,
             longitude: meta.longitude ?? 105.7724,
-            isActive: false, // Trạng thái "Chờ duyệt" bởi Admin
+            rating: 0,
+            reviewCount: 0,
+            isActive: false,
+            subscriptionPlan: plan,
+            isCooperation: pkgMeta.isCooperation,
           }),
         );
 
-        // Tạo bộ dịch vụ mặc định cho quán mới
         await this.serviceRepo.save([
           this.serviceRepo.create({
             shopId: newShop.id,
@@ -375,7 +525,6 @@ export class PaymentsService implements OnModuleInit {
       matchedTx.shopId = newShop.id;
       await this.txRepo.save(matchedTx);
 
-      // Thông báo cho tất cả Admin
       const admins = await this.userRepo.find({
         where: { role: UserRole.ADMIN },
       });
@@ -383,7 +532,7 @@ export class PaymentsService implements OnModuleInit {
         await this.notificationsService.createAndPush({
           recipientId: adminUser.id,
           title: 'Yêu cầu duyệt mở quán mới',
-          body: `Quán "${newShop.name}" (${newShop.address}) vừa hoàn tất phí đăng ký và đang chờ Admin phê duyệt.`,
+          body: `Quán "${newShop.name}" (${newShop.address}) vừa hoàn tất thanh toán và đang chờ Admin phê duyệt.`,
           type: NotificationType.SHOP_APPROVAL,
           metadata: { shopId: newShop.id },
         });
@@ -399,7 +548,7 @@ export class PaymentsService implements OnModuleInit {
       await this.notificationsService.createAndPush({
         recipientId: matchedTx.userId,
         title: 'Đã gửi hồ sơ đăng ký quán (Chờ duyệt)',
-        body: `Đã xác nhận lệ phí 100.000đ. Quán "${newShop.name}" đang ở trạng thái Chờ duyệt bởi Admin hệ thống.`,
+        body: `Quán "${newShop.name}" đang ở trạng thái Chờ duyệt bởi Admin hệ thống.`,
         type: NotificationType.SHOP_APPROVAL,
         metadata: { shopId: newShop.id },
       });
@@ -410,6 +559,58 @@ export class PaymentsService implements OnModuleInit {
         transactionId: matchedTx.id,
         shopId: newShop.id,
         referenceId: newShop.id,
+      };
+    } else if (
+      matchedTx.type === TransactionType.RENEW_SHOP &&
+      matchedTx.shopId
+    ) {
+      const shop = await this.shopRepo.findOne({
+        where: { id: matchedTx.shopId },
+      });
+      if (shop) {
+        const plan =
+          matchedTx.packagePlan ??
+          (matchedTx.metadataJson?.packagePlan as ShopPackagePlan | undefined) ??
+          shop.subscriptionPlan ??
+          ShopPackagePlan.MEMBER_MONTHLY;
+        const pkgMeta = SHOP_PACKAGE_CONFIG[plan];
+        const now = new Date();
+        const base =
+          shop.subscriptionExpiresAt && shop.subscriptionExpiresAt > now
+            ? shop.subscriptionExpiresAt
+            : now;
+        const newExpiry = new Date(
+          base.getTime() + pkgMeta.durationDays * 86400_000,
+        );
+
+        shop.subscriptionPlan = plan;
+        shop.isCooperation = pkgMeta.isCooperation;
+        shop.subscriptionExpiresAt = newExpiry;
+        shop.highlightExpiresAt = pkgMeta.isCooperation ? newExpiry : null;
+        shop.renewalNotifiedAt = null;
+        await this.shopRepo.save(shop);
+
+        this.realtimeGateway.emitPaymentSuccess(matchedTx.userId, {
+          transactionId: matchedTx.id,
+          type: TransactionType.RENEW_SHOP,
+          shopId: shop.id,
+          subscriptionPlan: plan,
+          subscriptionExpiresAt: newExpiry,
+        });
+
+        await this.notificationsService.createAndPush({
+          recipientId: matchedTx.userId,
+          title: `Gia hạn ${pkgMeta.label} thành công!`,
+          body: `Gói quán "${shop.name}" đã được gia hạn đến ${newExpiry.toLocaleDateString('vi-VN')}.`,
+          type: NotificationType.PAYMENT_SUCCESS,
+          metadata: { shopId: shop.id },
+        });
+      }
+      return {
+        ...matchedTx,
+        success: true,
+        transactionId: matchedTx.id,
+        shopId: matchedTx.shopId,
       };
     } else if (
       matchedTx.type === TransactionType.BUY_HIGHLIGHT &&
@@ -474,10 +675,25 @@ export class PaymentsService implements OnModuleInit {
 export class PaymentsController {
   constructor(private readonly service: PaymentsService) {}
 
+  @Get('register-shop-credit')
+  @UseGuards(JwtAuthGuard)
+  getRegisterShopCredit(@CurrentUser() user: UserEntity) {
+    return this.service.getRegisterShopCredit(user.id);
+  }
+
   @Post('register-shop-qr')
   @UseGuards(JwtAuthGuard)
   createRegisterShopQr(@CurrentUser() user: UserEntity, @Body() dto: any) {
     return this.service.createRegisterShopQr(user, dto);
+  }
+
+  @Post('renew-shop-qr')
+  @UseGuards(JwtAuthGuard)
+  createRenewShopQr(
+    @CurrentUser() user: UserEntity,
+    @Body() body: { packagePlan: ShopPackagePlan },
+  ) {
+    return this.service.createRenewShopQr(user.id, body.packagePlan);
   }
 
   @Post('highlight-qr')

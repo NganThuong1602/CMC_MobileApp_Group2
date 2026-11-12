@@ -33,12 +33,16 @@ class BookingSlotCalculator {
   const BookingSlotCalculator();
 
   BookingCalculationSummary calculateServicesSummary(
-    List<ServiceEntity> selectedServices,
-  ) {
-    final totalPrice = selectedServices.fold<int>(
+    List<ServiceEntity> selectedServices, {
+    int discountPercent = 0,
+  }) {
+    final rawTotal = selectedServices.fold<int>(
       0,
       (sum, item) => sum + item.price,
     );
+    final totalPrice = discountPercent > 0
+        ? ((rawTotal * (100 - discountPercent)) / 100).round().clamp(0, rawTotal)
+        : rawTotal;
     final totalDuration = selectedServices.fold<int>(
       0,
       (sum, item) => sum + item.durationMinutes,
@@ -71,11 +75,10 @@ class BookingSlotCalculator {
     String? ignoreUserId,
   }) {
     final inMorningShift = startMinutes >= shopOpenMinutes &&
-        endMinutes <= AppConstants.lunchStartMinutes;
-    final inAfternoonShift = startMinutes >= AppConstants.lunchEndMinutes &&
+        endMinutes <= AppConstants.morningShiftEndMinutes;
+    final inAfternoonShift = startMinutes >= AppConstants.afternoonShiftStartMinutes &&
         endMinutes <= shopCloseMinutes;
 
-    // Chặn tràn qua 11:30 (nghỉ trưa) hoặc giờ đóng cửa
     if (!inMorningShift && !inAfternoonShift) {
       return true;
     }
@@ -93,23 +96,56 @@ class BookingSlotCalculator {
       }
     }
 
-    for (final lock in activeLocks) {
-      if (lock.isExpiredAt(now)) continue;
-      if (!lock.isSameDay(date)) continue;
-      if (ignoreUserId != null && lock.lockedByUserId == ignoreUserId) {
-        continue;
-      }
-      if (isOverlapping(
-        startA: startMinutes,
-        endA: endMinutes,
-        startB: lock.startMinutes,
-        endB: lock.endMinutes,
-      )) {
-        return true;
-      }
-    }
-
     return false;
+  }
+
+  ShiftOptionEntity computeShiftOption({
+    required BookingShift shift,
+    required int shiftStart,
+    required int shiftEnd,
+    required int durationMinutes,
+    required List<BookingEntity> dayBookings,
+  }) {
+    final shiftBookings = dayBookings.where((b) {
+      if (b.shift != null) return b.shift == shift;
+      return shift == BookingShift.morning
+          ? b.endMinutes <= AppConstants.morningShiftEndMinutes
+          : b.startMinutes >= AppConstants.afternoonShiftStartMinutes;
+    }).toList();
+
+    final maxEnd = shiftBookings.isEmpty
+        ? null
+        : shiftBookings
+            .map((b) => b.endMinutes)
+            .reduce((a, b) => a > b ? a : b);
+
+    final startMinutes = maxEnd == null
+        ? shiftStart
+        : (shiftStart > maxEnd + AppConstants.bookingGapMinutes
+            ? shiftStart
+            : maxEnd + AppConstants.bookingGapMinutes);
+    final endMinutes = startMinutes + durationMinutes;
+    final isAvailable =
+        shiftStart < shiftEnd && durationMinutes > 0 && endMinutes <= shiftEnd;
+
+    final startStr = AppFormatters.minutesFromMidnightToHhMm(startMinutes);
+    final endStr = AppFormatters.minutesFromMidnightToHhMm(endMinutes);
+    final shiftRange =
+        '${AppFormatters.minutesFromMidnightToHhMm(shiftStart)} - ${AppFormatters.minutesFromMidnightToHhMm(shiftEnd)}';
+
+    return ShiftOptionEntity(
+      shift: shift,
+      label: shift.label,
+      shiftRangeLabel: shiftRange,
+      startMinutes: startMinutes,
+      endMinutes: endMinutes,
+      assignedRangeLabel: isAvailable ? '$startStr - $endStr' : null,
+      bookedCount: shiftBookings.length,
+      isAvailable: isAvailable,
+      unavailableReason: isAvailable
+          ? null
+          : 'Ca này đã đầy lịch hoặc không còn đủ $durationMinutes phút trước ${AppFormatters.minutesFromMidnightToHhMm(shiftEnd)}',
+    );
   }
 
   DaySlotSchedule buildDaySchedule({
@@ -125,113 +161,40 @@ class BookingSlotCalculator {
   }) {
     final openMinutes = AppFormatters.hhMmToMinutesFromMidnight(shopOpenTime);
     final closeMinutes = AppFormatters.hhMmToMinutesFromMidnight(shopCloseTime);
-    final effectiveDuration =
-        totalDurationMinutes > 0 ? totalDurationMinutes : stepMinutes;
+    final effectiveDuration = totalDurationMinutes > 0 ? totalDurationMinutes : 15;
 
     final validBookings = existingBookings
         .where((b) => b.status != BookingStatus.cancelled && b.isSameDay(date))
         .toList();
 
-    final validLocks = activeLocks
-        .where(
-          (l) =>
-              !l.isExpiredAt(now) &&
-              l.isSameDay(date) &&
-              (currentUserId == null || l.lockedByUserId != currentUserId),
-        )
-        .toList();
-
-    List<TimeSlotEntity> buildShift({
-      required int shiftStart,
-      required int shiftEnd,
-      required bool isMorning,
-      required String shiftLimitLabel,
-    }) {
-      final list = <TimeSlotEntity>[];
-      for (int start = shiftStart; start < shiftEnd; start += stepMinutes) {
-        final allocatedEnd = start + effectiveDuration;
-
-        final directlyBooked = validBookings.any(
-              (b) => start >= b.startMinutes && start < b.endMinutes,
-            ) ||
-            validLocks.any(
-              (l) => start >= l.startMinutes && start < l.endMinutes,
-            );
-
-        bool hasDurationConflict = false;
-        String? reason;
-
-        if (directlyBooked) {
-          reason = 'Khung giờ đã có khách đặt';
-        } else if (allocatedEnd > shiftEnd) {
-          // Chặn tràn giờ qua 11:30 hoặc giờ đóng cửa
-          hasDurationConflict = true;
-          reason = 'Lấn qua $shiftLimitLabel (${AppFormatters.minutesFromMidnightToHhMm(shiftEnd)})';
-        } else {
-          final overlapsNext = validBookings.any(
-                (b) => isOverlapping(
-                  startA: start,
-                  endA: allocatedEnd,
-                  startB: b.startMinutes,
-                  endB: b.endMinutes,
-                ),
-              ) ||
-              validLocks.any(
-                (l) => isOverlapping(
-                  startA: start,
-                  endA: allocatedEnd,
-                  startB: l.startMinutes,
-                  endB: l.endMinutes,
-                ),
-              );
-
-          if (overlapsNext) {
-            hasDurationConflict = true;
-            reason =
-                'Không đủ $effectiveDuration phút trống trước lịch kế tiếp';
-          }
-        }
-
-        list.add(
-          TimeSlotEntity(
-            startMinutes: start,
-            allocatedEndMinutes: allocatedEnd,
-            isMorning: isMorning,
-            isBooked: directlyBooked,
-            hasDurationConflict: hasDurationConflict,
-            unavailableReason: reason,
-          ),
-        );
-      }
-      return list;
-    }
-
-    final morningStart = openMinutes < AppConstants.lunchStartMinutes
+    final morningStart = openMinutes < AppConstants.morningShiftEndMinutes
         ? openMinutes
         : 8 * 60 + 30;
-    final afternoonEnd = closeMinutes > AppConstants.lunchEndMinutes
+    final afternoonEnd = closeMinutes > AppConstants.afternoonShiftStartMinutes
         ? closeMinutes
         : 20 * 60 + 30;
 
-    final morningSlots = buildShift(
+    final morningShift = computeShiftOption(
+      shift: BookingShift.morning,
       shiftStart: morningStart,
-      shiftEnd: AppConstants.lunchStartMinutes,
-      isMorning: true,
-      shiftLimitLabel: 'ca sáng',
+      shiftEnd: AppConstants.morningShiftEndMinutes,
+      durationMinutes: effectiveDuration,
+      dayBookings: validBookings,
     );
 
-    final afternoonSlots = buildShift(
-      shiftStart: AppConstants.lunchEndMinutes,
+    final afternoonShift = computeShiftOption(
+      shift: BookingShift.afternoon,
+      shiftStart: AppConstants.afternoonShiftStartMinutes,
       shiftEnd: afternoonEnd,
-      isMorning: false,
-      shiftLimitLabel: 'giờ đóng cửa',
+      durationMinutes: effectiveDuration,
+      dayBookings: validBookings,
     );
 
     return DaySlotSchedule(
       date: DateTime(date.year, date.month, date.day),
       totalDurationMinutes: effectiveDuration,
-      morningSlots: morningSlots,
-      afternoonSlots: afternoonSlots,
+      morningShift: morningShift,
+      afternoonShift: afternoonShift,
     );
   }
 }

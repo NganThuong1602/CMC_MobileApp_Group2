@@ -22,7 +22,7 @@ import '../../widgets/sepay_qr_dialog.dart';
 /// Màn hình Quản lý quán (Role MANAGER):
 /// - Ảnh cover bo góc có gradient đáy, hiển thị Tên quán + Giờ mở cửa + SĐT đè lên ảnh.
 /// - 5 Card menu bo góc:
-///   1. `Quản lý thông tin` (Sửa thông tin quán, hình ảnh, Mua gói Nổi bật SePay 20k/50k/90k)
+///   1. `Quản lý thông tin` (Sửa thông tin quán, hình ảnh, Trạng thái gói & Gia hạn gói quán SePay)
 ///   2. `Quản lý dịch vụ` (Nằm ngay dưới Quản lý thông tin: Danh sách dịch vụ + Thêm, Sửa, Xoá dịch vụ)
 ///   3. `Quản lý barber` (Tìm Email/SĐT mời làm Barber gửi thông báo thật, chỉnh lương cứng, Xoá barber)
 ///   4. `Tư vấn khách hàng` (Chat trực tiếp giữa Chủ quán và Khách hàng, nhận thông báo thật)
@@ -296,6 +296,39 @@ class _MyShopPageState extends State<MyShopPage> {
                                 ],
                               ),
                             ),
+                            if (_shop!.subscriptionExpiresAt != null &&
+                                _shop!.subscriptionExpiresAt!
+                                        .difference(DateTime.now())
+                                        .inDays <=
+                                    7) ...[
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: appColors.warningContainer,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color:
+                                        appColors.warning.withValues(alpha: 0.5),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.warning_amber_rounded,
+                                      color: appColors.warning,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        'Gói quán sắp hết hạn vào ${AppFormatters.formatDateDdMmYyyy(_shop!.subscriptionExpiresAt!)}. Vui lòng vào "Quản lý thông tin" để gia hạn trước khi quán bị tự động gỡ!',
+                                        style: tt.bodySmallStrong,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                             const SizedBox(height: 18),
                             _buildManagerMenuCard(
                               context: context,
@@ -462,14 +495,14 @@ class _ManageShopInfoScreenState extends State<_ManageShopInfoScreen> {
         _closeError == null;
   }
 
-  Future<void> _buyHighlight(HighlightPackageType pkg) async {
+  Future<void> _renewPackage(ShopPackagePlan plan) async {
     final cs = context.colorScheme;
     final user = context.read<AuthCubit>().state.user;
     if (user == null) return;
-    final res = await sl<ShopRepository>().createHighlightPayment(
+    final res = await sl<ShopRepository>().createRenewShopPayment(
       userId: user.id,
       shopId: widget.shop.id,
-      packageType: pkg,
+      packagePlan: plan,
     );
     if (!mounted) return;
     res.fold(
@@ -479,7 +512,7 @@ class _ManageShopInfoScreenState extends State<_ManageShopInfoScreen> {
       onSuccess: (tx) async {
         final paid = await SepayQrDialog.show(
           context,
-          title: 'Mua ${pkg.label} Nổi bật (SePay)',
+          title: 'Gia hạn ${plan.label} (SePay)',
           transaction: tx,
         );
         if (paid && mounted) {
@@ -487,11 +520,193 @@ class _ManageShopInfoScreenState extends State<_ManageShopInfoScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               backgroundColor: cs.primary,
-              content: Text('Đã kích hoạt ${pkg.label} thành công!'),
+              content: Text('Đã gia hạn ${plan.label} thành công!'),
             ),
           );
         }
       },
+    );
+  }
+
+  Widget _buildPackageStatusAndRenewSection() {
+    final cs = context.colorScheme;
+    final ac = context.appColors;
+    final tt = context.appTextStyles;
+    final shop = widget.shop;
+    final now = DateTime.now();
+    final expiresAt = shop.subscriptionExpiresAt;
+    final int? daysLeft = expiresAt?.difference(now).inDays;
+    final bool isExpired = expiresAt != null && expiresAt.isBefore(now);
+    final bool isExpiringSoon =
+        daysLeft != null && daysLeft >= 0 && daysLeft <= 7;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Trạng thái gói quán hiện tại', style: tt.sectionTitle),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: isExpired
+                ? cs.errorContainer
+                : isExpiringSoon
+                    ? ac.warningContainer
+                    : cs.primaryContainer,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isExpired
+                  ? cs.error
+                  : isExpiringSoon
+                      ? ac.warning
+                      : cs.primary,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    shop.isCooperation
+                        ? Icons.workspace_premium_rounded
+                        : Icons.verified_user_outlined,
+                    color: isExpired
+                        ? cs.error
+                        : isExpiringSoon
+                            ? ac.warning
+                            : cs.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      shop.subscriptionPlan?.label ??
+                          (shop.isCooperation
+                              ? 'Gói Hợp tác'
+                              : 'Gói Thành viên'),
+                      style: tt.cardTitle,
+                    ),
+                  ),
+                  if (shop.isCooperation)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: cs.primary,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text('Hỗ trợ Nổi bật', style: tt.badgeOnPrimary),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                shop.isCooperation
+                    ? 'Quán đang được ưu tiên Nổi bật ở đầu Trang chủ & tự động áp dụng Mã giảm giá từ Admin.'
+                    : 'Gói tiêu chuẩn. Có thể gia hạn lên Gói Hợp tác để được đẩy lên Nổi bật.',
+                style: tt.bodySmallMuted,
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(
+                    Icons.event_available_rounded,
+                    size: 16,
+                    color: isExpired
+                        ? cs.error
+                        : isExpiringSoon
+                            ? ac.warning
+                            : cs.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      expiresAt == null
+                          ? 'Hạn sử dụng: Chưa thiết lập'
+                          : isExpired
+                              ? 'Đã hết hạn ngày ${AppFormatters.formatDateDdMmYyyy(expiresAt)} — Cần gia hạn ngay để tránh bị tự động gỡ quán'
+                              : isExpiringSoon
+                                  ? 'Hết hạn: ${AppFormatters.formatDateDdMmYyyy(expiresAt)} (Còn $daysLeft ngày — Sắp hết hạn!)'
+                                  : 'Hạn sử dụng đến: ${AppFormatters.formatDateDdMmYyyy(expiresAt)} (Còn $daysLeft ngày)',
+                      style: isExpired
+                          ? tt.bodySmallDanger
+                          : isExpiringSoon
+                              ? tt.bodySmallWarning
+                              : tt.bodySmallPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text('Gia hạn gói quán qua SePay', style: tt.sectionTitle),
+        const SizedBox(height: 8),
+        ...ShopPackagePlan.values.map((plan) {
+          final isCurrent = shop.subscriptionPlan == plan;
+          return Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: cs.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: plan.isCooperation ? cs.primary : cs.outlineVariant,
+                width: plan.isCooperation ? 1.5 : 1,
+              ),
+              boxShadow: ac.cardShadow,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(plan.label, style: tt.cardTitle),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${AppFormatters.formatVnd(plan.price)} • ${plan.durationDays} ngày',
+                            style: tt.pricePrimary,
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (plan.isCooperation)
+                      Container(
+                        margin: const EdgeInsets.only(right: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: cs.primaryContainer,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          isCurrent ? 'Đang dùng' : 'Nổi bật',
+                          style: tt.badgePrimary,
+                        ),
+                      ),
+                    ElevatedButton(
+                      onPressed: () => _renewPackage(plan),
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(86, 36),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                      child: const Text('Gia hạn'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(plan.benefitDescription, style: tt.bodySmallMuted),
+              ],
+            ),
+          );
+        }),
+      ],
     );
   }
 
@@ -501,43 +716,12 @@ class _ManageShopInfoScreenState extends State<_ManageShopInfoScreen> {
     final tt = context.appTextStyles;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Quản lý thông tin & Nổi bật')),
+      appBar: AppBar(title: const Text('Quản lý thông tin & Gói quán')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text(
-            'Mua gói Nổi bật tự động qua SePay',
-            style: tt.sectionTitle,
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: HighlightPackageType.values.map((pkg) {
-              return Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: OutlinedButton(
-                    onPressed: () => _buyHighlight(pkg),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                    ),
-                    child: Column(
-                      children: [
-                        Text(
-                          pkg.label,
-                          style: tt.bodySmallPrimary,
-                        ),
-                        Text(
-                          AppFormatters.formatVnd(pkg.priceVnd),
-                          style: tt.captionMuted,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 20),
+          _buildPackageStatusAndRenewSection(),
+          const SizedBox(height: 12),
           Text(
             'Thông tin cửa hàng',
             style: tt.sectionTitle,

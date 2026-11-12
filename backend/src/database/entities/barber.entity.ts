@@ -42,6 +42,13 @@ export class BarberEntity {
   @Column({ type: 'float', default: 5.0 })
   rating!: number;
 
+  @Column({
+    name: 'joined_at',
+    type: 'timestamptz',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
+  joinedAt!: Date;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

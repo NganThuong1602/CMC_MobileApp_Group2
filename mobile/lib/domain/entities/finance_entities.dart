@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../core/enums/app_enums.dart';
 
 /// Tổng hợp thu nhập của Barber (CHỈ cộng hoa hồng 10% khi Booking COMPLETED).
 class BarberIncomeSummary extends Equatable {
@@ -105,5 +106,53 @@ class MonthlyBookingHeatDay extends Equatable {
 
   @override
   List<Object?> get props => [date, totalBookings, completedBookings];
+}
+
+class DiscountCodeEntity extends Equatable {
+  final String id;
+  final String name;
+  final String code;
+  final int discountPercent;
+  final DateTime startAt;
+  final DateTime endAt;
+  final bool isActive;
+
+  const DiscountCodeEntity({
+    required this.id,
+    required this.name,
+    this.code = '',
+    required this.discountPercent,
+    required this.startAt,
+    required this.endAt,
+    this.isActive = true,
+  });
+
+  bool isActiveAt(DateTime now) {
+    return isActive && !now.isBefore(startAt) && !now.isAfter(endAt);
+  }
+
+  @override
+  List<Object?> get props =>
+      [id, name, code, discountPercent, startAt, endAt, isActive];
+}
+
+class RegisterShopCredit extends Equatable {
+  final bool hasCredit;
+  final String paymentCode;
+  final ShopPackagePlan? packagePlan;
+  final int amount;
+  final DateTime? paidAt;
+
+  const RegisterShopCredit({
+    required this.hasCredit,
+    this.paymentCode = '',
+    this.packagePlan,
+    this.amount = 0,
+    this.paidAt,
+  });
+
+  @override
+  List<Object?> get props =>
+      [hasCredit, paymentCode, packagePlan, amount, paidAt];
 }
 

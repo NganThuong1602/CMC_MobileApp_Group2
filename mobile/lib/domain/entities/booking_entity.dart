@@ -22,6 +22,7 @@ class BookingEntity extends Equatable {
   final BookingStatus status;
   final bool isPaid;
   final String? paymentCode;
+  final BookingShift? shift;
   final DateTime createdAt;
 
   const BookingEntity({
@@ -43,6 +44,7 @@ class BookingEntity extends Equatable {
     required this.status,
     required this.isPaid,
     this.paymentCode,
+    this.shift,
     required this.createdAt,
   });
 
@@ -80,6 +82,7 @@ class BookingEntity extends Equatable {
       status: status ?? this.status,
       isPaid: isPaid ?? this.isPaid,
       paymentCode: paymentCode,
+      shift: shift,
       createdAt: createdAt,
     );
   }
@@ -98,6 +101,7 @@ class BookingEntity extends Equatable {
         status,
         isPaid,
         paymentCode,
+        shift,
       ];
 }
 

@@ -3,13 +3,15 @@ import 'package:equatable/equatable.dart';
 class PaymentTransactionEntity extends Equatable {
   final String id;
   final String userId;
-  final String type; // REGISTER_SHOP | BUY_HIGHLIGHT | BOOKING_PAYMENT
+  final String type; // REGISTER_SHOP | RENEW_SHOP | BUY_HIGHLIGHT | BOOKING_PAYMENT
   final int amount;
   final String paymentCode;
   final String transferContent;
   final String qrImageUrl;
   final String status; // PENDING | SUCCESS
   final String? referenceId;
+  final String? packagePlan;
+  final bool readyForShopForm;
 
   const PaymentTransactionEntity({
     required this.id,
@@ -21,6 +23,8 @@ class PaymentTransactionEntity extends Equatable {
     required this.qrImageUrl,
     required this.status,
     this.referenceId,
+    this.packagePlan,
+    this.readyForShopForm = false,
   });
 
   bool get isSuccess => status.toUpperCase() == 'SUCCESS';
@@ -36,6 +40,8 @@ class PaymentTransactionEntity extends Equatable {
         qrImageUrl,
         status,
         referenceId,
+        packagePlan,
+        readyForShopForm,
       ];
 }
 

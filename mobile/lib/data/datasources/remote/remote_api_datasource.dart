@@ -215,6 +215,7 @@ class RemoteApiDataSource {
     double? lng,
     String? search,
     double? minRating,
+    bool? onlyHighlighted,
   }) async {
     final res = await apiClient.dio.get(
       '/shops/nearby',
@@ -223,6 +224,7 @@ class RemoteApiDataSource {
         if (lng != null) 'lng': lng,
         if (search != null && search.isNotEmpty) 'search': search,
         if (minRating != null) 'minRating': minRating,
+        if (onlyHighlighted == true) 'onlyHighlighted': true,
       },
     );
     final list = res.data as List;
@@ -347,6 +349,26 @@ class RemoteApiDataSource {
     );
   }
 
+  Future<Map<String, dynamic>> getRegisterShopCredit() async {
+    final res = await apiClient.dio.get('/payments/register-shop-credit');
+    return Map<String, dynamic>.from(res.data as Map);
+  }
+
+  Future<ShopModel> submitRegisterShopForm(Map<String, dynamic> dto) async {
+    final res = await apiClient.dio.post('/shops/register', data: dto);
+    return ShopModel.fromJson(Map<String, dynamic>.from(res.data as Map));
+  }
+
+  Future<PaymentTransactionModel> createRenewShopQr(String packagePlan) async {
+    final res = await apiClient.dio.post(
+      '/payments/renew-shop-qr',
+      data: {'packagePlan': packagePlan},
+    );
+    return PaymentTransactionModel.fromJson(
+      Map<String, dynamic>.from(res.data as Map),
+    );
+  }
+
   Future<PaymentTransactionModel> createHighlightQr(String plan) async {
     final res = await apiClient.dio.post(
       '/payments/highlight-qr',
@@ -410,6 +432,7 @@ class RemoteApiDataSource {
     required String bookingDate,
     required int startMinutes,
     required String paymentMethod,
+    String? shift,
   }) async {
     final res = await apiClient.dio.post(
       '/bookings',
@@ -420,6 +443,7 @@ class RemoteApiDataSource {
         'bookingDate': bookingDate,
         'startMinutes': startMinutes,
         'paymentMethod': paymentMethod,
+        if (shift != null) 'shift': shift,
       },
     );
     return BookingModel.fromJson(Map<String, dynamic>.from(res.data as Map));
@@ -690,5 +714,48 @@ class RemoteApiDataSource {
 
   Future<void> markNotificationRead(String notificationId) async {
     await apiClient.dio.patch('/notifications/$notificationId/read');
+  }
+
+  // ==================== FORUM & DISCOUNTS ====================
+  Future<List<PostModel>> getForumPosts() async {
+    final res = await apiClient.dio.get('/posts/forum');
+    final list = res.data as List;
+    return list
+        .whereType<Map>()
+        .map((m) => PostModel.fromJson(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<List<DiscountCodeModel>> getDiscountCodes() async {
+    final res = await apiClient.dio.get('/discounts');
+    final list = res.data as List;
+    return list
+        .whereType<Map>()
+        .map((m) => DiscountCodeModel.fromJson(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  Future<DiscountCodeModel> createDiscountCode({
+    required String name,
+    String? code,
+    required int discountPercent,
+    required DateTime startAt,
+    required DateTime endAt,
+  }) async {
+    final res = await apiClient.dio.post(
+      '/discounts/admin',
+      data: {
+        'name': name,
+        if (code != null && code.trim().isNotEmpty) 'code': code.trim(),
+        'discountPercent': discountPercent,
+        'startAt': startAt.toUtc().toIso8601String(),
+        'endAt': endAt.toUtc().toIso8601String(),
+      },
+    );
+    return DiscountCodeModel.fromJson(Map<String, dynamic>.from(res.data as Map));
+  }
+
+  Future<void> deleteDiscountCode(String id) async {
+    await apiClient.dio.delete('/discounts/$id');
   }
 }

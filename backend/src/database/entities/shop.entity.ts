@@ -11,6 +11,7 @@ import {
 import { UserEntity } from './user.entity';
 import { BarberEntity } from './barber.entity';
 import { ServiceEntity } from './service.entity';
+import { ShopPackagePlan } from './enums';
 
 @Entity('shops')
 export class ShopEntity {
@@ -58,7 +59,7 @@ export class ShopEntity {
   @Column({ type: 'double precision', default: 105.7724 })
   longitude!: number;
 
-  @Column({ type: 'float', default: 5.0 })
+  @Column({ type: 'float', default: 0.0 })
   rating!: number;
 
   @Column({ name: 'review_count', type: 'int', default: 0 })
@@ -69,6 +70,23 @@ export class ShopEntity {
 
   @Column({ name: 'highlight_expires_at', type: 'timestamptz', nullable: true })
   highlightExpiresAt?: Date | null;
+
+  @Column({
+    name: 'subscription_plan',
+    type: 'enum',
+    enum: ShopPackagePlan,
+    nullable: true,
+  })
+  subscriptionPlan?: ShopPackagePlan | null;
+
+  @Column({ name: 'is_cooperation', default: false })
+  isCooperation!: boolean;
+
+  @Column({ name: 'subscription_expires_at', type: 'timestamptz', nullable: true })
+  subscriptionExpiresAt?: Date | null;
+
+  @Column({ name: 'renewal_notified_at', type: 'timestamptz', nullable: true })
+  renewalNotifiedAt?: Date | null;
 
   @OneToMany(() => BarberEntity, (barber) => barber.shop)
   barbers?: BarberEntity[];

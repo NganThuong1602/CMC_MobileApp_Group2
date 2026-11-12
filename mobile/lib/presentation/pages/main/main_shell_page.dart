@@ -16,10 +16,10 @@ import '../manager/my_shop_page.dart';
 import '../map/map_page.dart';
 
 /// Khung điều hướng chính (Main Shell) tự động thay đổi 4 hoặc 5 Tab dựa theo Role hiện tại:
-/// - USER: [Trang chủ, Bản đồ, Nổi bật, Hồ Sơ]
-/// - MANAGER: [Trang chủ, Bản đồ, Quản lý (FAB tròn lồi), Nổi bật, Hồ Sơ]
-/// - BARBER: [Trang chủ, Bản đồ, Lịch (FAB tròn lồi), Nổi bật, Hồ Sơ]
-/// - ADMIN: [Trang chủ, Bản đồ, Admin (FAB tròn lồi), Nổi bật, Hồ Sơ]
+/// - USER: [Trang chủ, Bản đồ, Diễn đàn, Hồ Sơ]
+/// - MANAGER: [Trang chủ, Bản đồ, Quản lý (FAB tròn lồi), Diễn đàn, Hồ Sơ]
+/// - BARBER: [Trang chủ, Bản đồ, Lịch (FAB tròn lồi), Diễn đàn, Hồ Sơ]
+/// - ADMIN: [Trang chủ, Bản đồ, Admin (FAB tròn lồi), Diễn đàn, Hồ Sơ]
 class MainShellPage extends StatefulWidget {
   final int? requestedTabIndex;
   final bool openCustomerConsult;

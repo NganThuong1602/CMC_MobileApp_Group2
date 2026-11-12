@@ -30,6 +30,7 @@ abstract class BookingRepository {
     required List<String> serviceIds,
     required DateTime date,
     required int startMinutes,
+    BookingShift? shift,
     required PaymentMethod paymentMethod,
   });
 

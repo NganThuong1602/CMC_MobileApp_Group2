@@ -2,6 +2,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/enums/app_enums.dart';
 import '../../domain/entities/barber_entity.dart';
 import '../../domain/entities/booking_entity.dart';
+import '../../domain/entities/finance_entities.dart';
 import '../../domain/entities/payment_transaction_entity.dart';
 import '../../domain/entities/service_entity.dart';
 import '../../domain/entities/shop_entity.dart';
@@ -101,6 +102,16 @@ class ShopModel extends ShopEntity {
     super.ownerName,
     super.ownerPhone,
     super.ownerEmail,
+    super.subscriptionPlan,
+    super.isCooperation,
+    super.subscriptionExpiresAt,
+    super.serverIsHighlighted,
+    super.activeDiscountPercent,
+    super.activeDiscountName,
+    super.activeDiscountCode,
+    super.paymentCode,
+    super.paymentAmount,
+    super.paidAt,
   });
 
   factory ShopModel.fromJson(Map<String, dynamic> json) {
@@ -114,6 +125,9 @@ class ShopModel extends ShopEntity {
     final ownerMap = json['owner'] is Map
         ? Map<String, dynamic>.from(json['owner'] as Map)
         : null;
+    final reviewCount = (json['reviewCount'] as num?)?.toInt() ?? 0;
+    final rawRating = (json['rating'] as num?)?.toDouble() ?? 0.0;
+
     return ShopModel(
       id: (json['id'] ?? '').toString(),
       ownerId: (json['ownerId'] ?? ownerMap?['id'] ?? '').toString(),
@@ -131,8 +145,8 @@ class ShopModel extends ShopEntity {
           (json['longitude'] as num?)?.toDouble() ?? AppConstants.defaultLng,
       openTime: (json['openTime'] ?? '08:30').toString(),
       closeTime: (json['closeTime'] ?? '20:30').toString(),
-      rating: (json['rating'] as num?)?.toDouble() ?? 4.9,
-      reviewCount: (json['reviewCount'] as num?)?.toInt() ?? 0,
+      rating: reviewCount == 0 ? 0.0 : rawRating,
+      reviewCount: reviewCount,
       distanceKm: (json['distanceKm'] as num?)?.toDouble() ?? 0.5,
       highlightExpiresAt: json['highlightExpiresAt'] != null
           ? DateTime.tryParse(json['highlightExpiresAt'].toString())
@@ -144,6 +158,22 @@ class ShopModel extends ShopEntity {
           (json['ownerPhone'] ?? ownerMap?['phone'] ?? '').toString(),
       ownerEmail:
           (json['ownerEmail'] ?? ownerMap?['email'] ?? '').toString(),
+      subscriptionPlan:
+          ShopPackagePlan.fromApi(json['subscriptionPlan']?.toString()),
+      isCooperation: json['isCooperation'] as bool? ?? false,
+      subscriptionExpiresAt: json['subscriptionExpiresAt'] != null
+          ? DateTime.tryParse(json['subscriptionExpiresAt'].toString())
+          : null,
+      serverIsHighlighted: json['isHighlighted'] as bool? ?? false,
+      activeDiscountPercent:
+          (json['activeDiscountPercent'] as num?)?.toInt() ?? 0,
+      activeDiscountName: (json['activeDiscountName'] ?? '').toString(),
+      activeDiscountCode: (json['activeDiscountCode'] ?? '').toString(),
+      paymentCode: (json['paymentCode'] ?? '').toString(),
+      paymentAmount: (json['paymentAmount'] as num?)?.toInt() ?? 0,
+      paidAt: json['paidAt'] != null
+          ? DateTime.tryParse(json['paidAt'].toString())
+          : null,
     );
   }
 }
@@ -154,6 +184,7 @@ class ServiceModel extends ServiceEntity {
     required super.shopId,
     required super.name,
     required super.price,
+    super.discountedPrice,
     required super.durationMinutes,
     super.imageUrl,
   });
@@ -164,6 +195,7 @@ class ServiceModel extends ServiceEntity {
       shopId: (json['shopId'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
       price: (json['price'] as num?)?.toInt() ?? 0,
+      discountedPrice: (json['discountedPrice'] as num?)?.toInt(),
       durationMinutes: (json['durationMinutes'] as num?)?.toInt() ?? 30,
       imageUrl: json['imageUrl']?.toString(),
     );
@@ -184,6 +216,7 @@ class BarberModel extends BarberEntity {
     super.baseSalary,
     super.isActive,
     super.invitationAccepted,
+    super.joinedAt,
   });
 
   factory BarberModel.fromJson(
@@ -212,6 +245,9 @@ class BarberModel extends BarberEntity {
       baseSalary: (json['baseSalary'] as num?)?.toInt() ?? 6500000,
       isActive: json['isActive'] as bool? ?? true,
       invitationAccepted: json['invitationAccepted'] as bool? ?? true,
+      joinedAt: json['joinedAt'] != null
+          ? DateTime.tryParse(json['joinedAt'].toString())
+          : null,
     );
   }
 }
@@ -227,6 +263,8 @@ class PaymentTransactionModel extends PaymentTransactionEntity {
     required super.qrImageUrl,
     required super.status,
     super.referenceId,
+    super.packagePlan,
+    super.readyForShopForm,
   });
 
   factory PaymentTransactionModel.fromJson(Map<String, dynamic> json) {
@@ -242,6 +280,8 @@ class PaymentTransactionModel extends PaymentTransactionEntity {
       referenceId:
           (json['referenceId'] ?? json['shopId'] ?? json['bookingId'])
               ?.toString(),
+      packagePlan: json['packagePlan']?.toString(),
+      readyForShopForm: json['readyForShopForm'] as bool? ?? false,
     );
   }
 }
@@ -266,6 +306,7 @@ class BookingModel extends BookingEntity {
     required super.status,
     required super.isPaid,
     super.paymentCode,
+    super.shift,
     required super.createdAt,
   });
 
@@ -341,6 +382,7 @@ class BookingModel extends BookingEntity {
       status: status,
       isPaid: json['isPaid'] as bool? ?? false,
       paymentCode: json['paymentCode']?.toString(),
+      shift: BookingShift.fromApi(json['shift']?.toString()),
       createdAt:
           DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
           DateTime.now(),
@@ -397,6 +439,8 @@ class PostModel extends PostEntity {
     required super.authorName,
     required super.authorRole,
     super.authorAvatarUrl,
+    super.authorShopId,
+    super.authorShopName,
     required super.content,
     required super.imageUrls,
     required super.comments,
@@ -437,6 +481,8 @@ class PostModel extends PostEntity {
       authorAvatarUrl: (rawAvatar != null && rawAvatar.isNotEmpty)
           ? rawAvatar
           : AppConstants.defaultAvatarUrl,
+      authorShopId: json['authorShopId']?.toString(),
+      authorShopName: json['authorShopName']?.toString(),
       content: (json['caption'] ?? json['content'] ?? '').toString(),
       imageUrls: imgs,
       comments: cmts,
@@ -545,6 +591,34 @@ class AppNotificationModel extends AppNotificationEntity {
       createdAt:
           DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
           DateTime.now(),
+    );
+  }
+}
+
+class DiscountCodeModel extends DiscountCodeEntity {
+  const DiscountCodeModel({
+    required super.id,
+    required super.name,
+    super.code,
+    required super.discountPercent,
+    required super.startAt,
+    required super.endAt,
+    super.isActive,
+  });
+
+  factory DiscountCodeModel.fromJson(Map<String, dynamic> json) {
+    return DiscountCodeModel(
+      id: (json['id'] ?? '').toString(),
+      name: (json['name'] ?? '').toString(),
+      code: (json['code'] ?? '').toString(),
+      discountPercent: (json['discountPercent'] as num?)?.toInt() ?? 0,
+      startAt:
+          DateTime.tryParse((json['startAt'] ?? '').toString()) ??
+          DateTime.now(),
+      endAt:
+          DateTime.tryParse((json['endAt'] ?? '').toString()) ??
+          DateTime.now(),
+      isActive: json['isActive'] as bool? ?? true,
     );
   }
 }

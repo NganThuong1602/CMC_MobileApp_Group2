@@ -5,7 +5,7 @@ import '../../core/enums/app_enums.dart';
 import '../../core/theme/app_theme.dart';
 
 /// Thanh Bottom Navigation Bar linh hoạt theo Role:
-/// - Role USER: 4 tab (`Trang chủ`, `Bản đồ`, `Nổi bật`, `Hồ Sơ`)
+/// - Role USER: 4 tab (`Trang chủ`, `Bản đồ`, `Diễn đàn`, `Hồ Sơ`)
 /// - Role MANAGER: 5 tab, ở giữa có nút tròn to lồi lên + text `Quản lý`
 /// - Role BARBER: 5 tab, ở giữa có nút tròn to lồi lên + text `Lịch`
 /// - Role ADMIN: 5 tab, ở giữa có nút tròn to lồi lên + text `Admin`
@@ -63,9 +63,9 @@ class RoleBottomNavBar extends StatelessWidget {
               _buildTabItem(
                 context,
                 index: 2,
-                icon: Icons.local_fire_department_outlined,
-                activeIcon: Icons.local_fire_department_rounded,
-                label: 'Nổi bật',
+                icon: Icons.forum_outlined,
+                activeIcon: Icons.forum_rounded,
+                label: 'Diễn đàn',
               ),
               _buildTabItem(
                 context,
@@ -128,9 +128,9 @@ class RoleBottomNavBar extends StatelessWidget {
                 _buildTabItem(
                   context,
                   index: 3,
-                  icon: Icons.local_fire_department_outlined,
-                  activeIcon: Icons.local_fire_department_rounded,
-                  label: 'Nổi bật',
+                  icon: Icons.forum_outlined,
+                  activeIcon: Icons.forum_rounded,
+                  label: 'Diễn đàn',
                 ),
                 _buildTabItem(
                   context,

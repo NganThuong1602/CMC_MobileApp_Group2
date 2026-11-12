@@ -6,9 +6,11 @@ import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/di/injection_container.dart';
+import '../../../core/enums/app_enums.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../domain/entities/finance_entities.dart';
 import '../../../domain/entities/shop_entity.dart';
 import '../../../domain/repositories/shop_repository.dart';
 import '../../blocs/auth/auth_cubit.dart';
@@ -35,6 +37,9 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
   bool _loadingExisting = true;
   ShopEntity? _submittedShop;
   bool _showSubmittedDetails = true;
+  RegisterShopCredit? _paidCredit;
+  ShopPackagePlan _selectedPlan = ShopPackagePlan.coopMonthly;
+  bool _creatingPackageQr = false;
 
   // Bản đồ chọn & tinh chỉnh vị trí quán
   final MapController _pickerMapController = MapController();
@@ -54,6 +59,7 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
   String? _openError;
   String? _closeError;
   String? _coverError;
+  bool _hasUserGps = false;
 
   @override
   void initState() {
@@ -64,6 +70,7 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
       _userLng = discovery.userLng;
       _selectedLat = discovery.userLat;
       _selectedLng = discovery.userLng;
+      _hasUserGps = discovery.showUserLocationDot;
     } catch (_) {}
     _loadExistingShopAndLocation();
   }
@@ -79,6 +86,16 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
         });
         return;
       }
+
+      final creditRes = await sl<ShopRepository>().getRegisterShopCredit();
+      if (mounted && creditRes.data?.hasCredit == true) {
+        setState(() {
+          _paidCredit = creditRes.data;
+          if (creditRes.data?.packagePlan != null) {
+            _selectedPlan = creditRes.data!.packagePlan!;
+          }
+        });
+      }
     }
 
     if (mounted) {
@@ -87,8 +104,13 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
 
     // Lấy tọa độ GPS thực tế của thiết bị cho bản đồ chọn vị trí
     final loc = await sl<LocationService>().requestAndGetCurrentLocation();
-    if (!mounted || loc == null || !loc.granted) return;
+    if (!mounted) return;
+    if (loc == null || !loc.granted) {
+      setState(() => _hasUserGps = false);
+      return;
+    }
     setState(() {
+      _hasUserGps = true;
       _userLat = loc.latitude;
       _userLng = loc.longitude;
       if (_addrCtrl.text.trim().isEmpty) {
@@ -174,6 +196,7 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
     if (!mounted) return;
     if (loc != null && loc.granted) {
       setState(() {
+        _hasUserGps = true;
         _userLat = loc.latitude;
         _userLng = loc.longitude;
         _selectedLat = loc.latitude;
@@ -183,10 +206,13 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
       _movePickerMap(loc.latitude, loc.longitude, zoom: 16.2);
     } else {
       setState(() {
-        _selectedLat = _userLat;
-        _selectedLng = _userLng;
+        _hasUserGps = false;
       });
-      _movePickerMap(_userLat, _userLng, zoom: 16.0);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Vui lòng bật định vị để lấy vị trí GPS của bạn.'),
+        ),
+      );
     }
   }
 
@@ -228,7 +254,62 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
         closeErr == null;
   }
 
-  Future<void> _submit() async {
+  Future<void> _paySelectedPackage() async {
+    final user = context.read<AuthCubit>().state.user;
+    if (user == null) return;
+
+    setState(() => _creatingPackageQr = true);
+    final repo = sl<ShopRepository>();
+    final txRes = await repo.createPackageRegistrationPayment(
+      userId: user.id,
+      packagePlan: _selectedPlan,
+    );
+    if (!mounted) return;
+    setState(() => _creatingPackageQr = false);
+
+    txRes.fold(
+      onFailure: (f) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: context.colorScheme.error,
+            content: Text(f.message),
+          ),
+        );
+      },
+      onSuccess: (tx) async {
+        final paid = await SepayQrDialog.show(
+          context,
+          transaction: tx,
+          title: 'Thanh toán ${_selectedPlan.label} (SePay)',
+        );
+        if (paid && mounted) {
+          final creditRes = await repo.getRegisterShopCredit();
+          if (!mounted) return;
+          setState(() {
+            _paidCredit = (creditRes.data?.hasCredit == true)
+                ? creditRes.data
+                : RegisterShopCredit(
+                    hasCredit: true,
+                    paymentCode: tx.paymentCode,
+                    packagePlan: _selectedPlan,
+                    amount: tx.amount,
+                    paidAt: DateTime.now(),
+                  );
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: context.colorScheme.primary,
+              content: Text(
+                'Đã thanh toán ${_selectedPlan.label} thành công! Vui lòng điền thông tin quán để gửi Admin duyệt.',
+              ),
+            ),
+          );
+        }
+      },
+    );
+  }
+
+  Future<void> _submitShopFormAfterPayment() async {
     if (!_validateForm()) return;
 
     final user = context.read<AuthCubit>().state.user;
@@ -237,8 +318,9 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
     setState(() => _submitting = true);
 
     final repo = sl<ShopRepository>();
-    final txRes = await repo.createRegisterShopPayment(
+    final submitRes = await repo.submitShopRegistrationAfterPayment(
       userId: user.id,
+      paymentCode: _paidCredit?.paymentCode ?? '',
       name: _nameCtrl.text,
       address: _addrCtrl.text,
       phone: _phoneCtrl.text,
@@ -253,7 +335,7 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
     if (!mounted) return;
     setState(() => _submitting = false);
 
-    txRes.fold(
+    submitRes.fold(
       onFailure: (f) {
         final msg = f.message.toLowerCase();
         setState(() {
@@ -268,54 +350,24 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
           }
         });
       },
-      onSuccess: (tx) async {
-        final paid = await SepayQrDialog.show(
-          context,
-          transaction: tx,
-          title: 'Thanh toán phí mở quán (SePay)',
-        );
-        if (paid && mounted) {
-          await context.read<AuthCubit>().refreshCurrentUser();
-          if (!mounted) return;
-          try {
-            sl<ShopDiscoveryCubit>().loadAll(userId: user.id);
-          } catch (_) {}
-          final ownedRes = await sl<ShopRepository>().getShopByOwnerId(user.id);
-          if (!mounted) return;
-          setState(() {
-            _submittedShop = ownedRes.data ??
-                ShopEntity(
-                  id: tx.referenceId ?? 'pending_shop',
-                  ownerId: user.id,
-                  name: _nameCtrl.text.trim(),
-                  address: _addrCtrl.text.trim(),
-                  phone: _phoneCtrl.text.trim(),
-                  description: _descCtrl.text.trim().isEmpty
-                      ? 'Không gian cắt tóc chuyên nghiệp dành cho phái mạnh.'
-                      : _descCtrl.text.trim(),
-                  coverImageUrl: _coverUrl.trim().isNotEmpty
-                      ? _coverUrl.trim()
-                      : 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=900&q=80',
-                  galleryUrls: const [],
-                  latitude: _selectedLat,
-                  longitude: _selectedLng,
-                  rating: 5.0,
-                  reviewCount: 0,
-                  openTime: _openCtrl.text.trim(),
-                  closeTime: _closeCtrl.text.trim(),
-                  isActive: false,
-                );
-            _showSubmittedDetails = true;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: context.colorScheme.primary,
-              content: const Text(
-                'Đã thanh toán thành công! Hồ sơ quán của bạn đã chuyển sang trạng thái "Chờ duyệt".',
-              ),
+      onSuccess: (createdShop) async {
+        await context.read<AuthCubit>().refreshCurrentUser();
+        if (!mounted) return;
+        try {
+          sl<ShopDiscoveryCubit>().loadAll(userId: user.id);
+        } catch (_) {}
+        setState(() {
+          _submittedShop = createdShop;
+          _showSubmittedDetails = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: context.colorScheme.primary,
+            content: const Text(
+              'Đã gửi hồ sơ đăng ký quán! Trạng thái hiện tại: "Chờ duyệt" để Admin xem xét.',
             ),
-          );
-        }
+          ),
+        );
       },
     );
   }
@@ -339,14 +391,20 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
           },
         ),
         title: Text(
-          _submittedShop != null ? 'Trạng thái đăng ký quán' : 'Đăng ký mở quán',
+          _submittedShop != null
+              ? 'Trạng thái đăng ký quán'
+              : _paidCredit?.hasCredit == true
+                  ? 'Điền hồ sơ đăng ký quán'
+                  : 'Chọn gói đăng ký quán',
         ),
       ),
       body: _loadingExisting
           ? const Center(child: CircularProgressIndicator())
           : _submittedShop != null
               ? _buildSubmittedShopStatusView(context, _submittedShop!)
-              : _buildRegistrationFormView(context, cs, tt),
+              : _paidCredit?.hasCredit == true
+                  ? _buildRegistrationFormView(context, cs, tt)
+                  : _buildPackageSelectionView(context, cs, tt),
     );
   }
 
@@ -516,6 +574,30 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
                   ),
                 ),
                 const SizedBox(height: 14),
+                if (shop.subscriptionPlan != null) ...[
+                  _buildSubmittedInfoRow(
+                    context,
+                    icon: Icons.workspace_premium_outlined,
+                    label: 'Gói đã đăng ký',
+                    value:
+                        '${shop.subscriptionPlan!.label} (${shop.subscriptionPlan!.isCooperation ? 'Hỗ trợ Nổi bật & Mã giảm giá' : 'Gói tiêu chuẩn'})',
+                  ),
+                  const Divider(height: 20),
+                ],
+                if (shop.paymentAmount > 0 || shop.paymentCode.isNotEmpty) ...[
+                  _buildSubmittedInfoRow(
+                    context,
+                    icon: Icons.payments_outlined,
+                    label: 'Thanh toán SePay',
+                    value: [
+                      if (shop.paymentAmount > 0)
+                        AppFormatters.formatVnd(shop.paymentAmount),
+                      if (shop.paymentCode.isNotEmpty)
+                        'Mã GD: ${shop.paymentCode}',
+                    ].join(' • '),
+                  ),
+                  const Divider(height: 20),
+                ],
                 _buildSubmittedInfoRow(
                   context,
                   icon: Icons.storefront_outlined,
@@ -619,7 +701,7 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
     );
   }
 
-  Widget _buildRegistrationFormView(
+  Widget _buildPackageSelectionView(
     BuildContext context,
     ColorScheme cs,
     AppTextStyles tt,
@@ -633,11 +715,162 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: cs.primaryContainer,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Bước 1/2: Chọn gói đăng ký & Thanh toán SePay',
+                style: tt.sectionTitlePrimary,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Thanh toán gói thành công sẽ tự động mở khóa bước điền thông tin mở quán để gửi Admin duyệt.',
+                style: tt.bodySmallPrimary,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        ...ShopPackagePlan.values.map((plan) {
+          final selected = _selectedPlan == plan;
+          return GestureDetector(
+            onTap: () => setState(() => _selectedPlan = plan),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: selected ? cs.primaryContainer : cs.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: selected ? cs.primary : cs.outlineVariant,
+                  width: selected ? 2 : 1,
+                ),
+                boxShadow: appColors.cardShadow,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Icon(
+                      selected
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.radio_button_off_rounded,
+                      color: selected ? cs.primary : cs.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(plan.label, style: tt.cardTitle),
+                            ),
+                            if (plan.isCooperation)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: cs.primary,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  'Nổi bật & Ưu đãi',
+                                  style: tt.badgeOnPrimary,
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${AppFormatters.formatVnd(plan.price)} • Hiệu lực ${plan.durationDays} ngày',
+                          style: tt.pricePrimary,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          plan.benefitDescription,
+                          style: tt.bodySmallMuted,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: cs.outlineVariant),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Ưu đãi của gói đang chọn', style: tt.sectionTitle),
+              const SizedBox(height: 6),
+              Text(_selectedPlan.label, style: tt.bodyStrong),
+              const SizedBox(height: 4),
+              Text(_selectedPlan.benefitDescription, style: tt.bodySmallMuted),
+              if (_selectedPlan.isCooperation) ...[
+                const SizedBox(height: 6),
+                Text(
+                  '• Quán được ưu tiên đẩy lên đầu Trang chủ ("Nổi bật") và xuất hiện trong bộ lọc Nổi bật.\n'
+                  '• Tự động áp dụng các chương trình Mã giảm giá do Admin tạo.',
+                  style: tt.bodySmallPrimary,
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          height: 52,
+          child: ElevatedButton.icon(
+            onPressed: _creatingPackageQr ? null : _paySelectedPackage,
+            icon: const Icon(Icons.qr_code_scanner_rounded),
+            label: Text(
+              _creatingPackageQr
+                  ? 'Đang tạo mã VietQR...'
+                  : 'Thanh toán ${AppFormatters.formatVnd(_selectedPlan.price)} qua SePay',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRegistrationFormView(
+    BuildContext context,
+    ColorScheme cs,
+    AppTextStyles tt,
+  ) {
+    final appColors = context.appColors;
+    final paidPlan = _paidCredit?.packagePlan ?? _selectedPlan;
+    final paidAmount = _paidCredit?.amount ?? paidPlan.price;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: cs.primaryContainer,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Text(
-            'Phí kích hoạt cửa hàng: ${AppFormatters.formatVnd(AppConstants.shopRegistrationFeeVnd)}.\n'
-            'Sau khi thanh toán qua mã VietQR SePay, hồ sơ quán sẽ chuyển sang trạng thái "Chờ duyệt" để Admin hệ thống phê duyệt mở quán (tối đa 1 quán/tài khoản).',
+            'Đã thanh toán ${paidPlan.label} (${AppFormatters.formatVnd(paidAmount)}).\n'
+            'Bước 2/2: Vui lòng hoàn tất thông tin cửa hàng dưới đây và bấm "Xác nhận" để gửi Admin phê duyệt mở quán.',
             style: tt.bodySmallPrimary,
           ),
         ),
@@ -762,10 +995,6 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
                       ),
                       MarkerLayer(
                         markers: [
-                          _buildUserPinMarker(
-                            context,
-                            point: LatLng(_userLat, _userLng),
-                          ),
                           _buildShopPinMarker(
                             context,
                             point: LatLng(_selectedLat, _selectedLng),
@@ -773,6 +1002,11 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
                                 ? _nameCtrl.text.trim()
                                 : 'Vị trí quán',
                           ),
+                          if (_hasUserGps)
+                            _buildUserPinMarker(
+                              context,
+                              point: LatLng(_userLat, _userLng),
+                            ),
                         ],
                       ),
                     ],
@@ -858,12 +1092,12 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
         SizedBox(
           height: 52,
           child: ElevatedButton.icon(
-            onPressed: _submitting ? null : _submit,
-            icon: const Icon(Icons.qr_code_scanner_rounded),
+            onPressed: _submitting ? null : _submitShopFormAfterPayment,
+            icon: const Icon(Icons.check_circle_outline_rounded),
             label: Text(
               _submitting
-                  ? 'Đang tạo mã VietQR...'
-                  : 'Tạo mã QR SePay 100.000đ & Gửi duyệt',
+                  ? 'Đang gửi hồ sơ quán...'
+                  : 'Xác nhận & Gửi duyệt mở quán',
             ),
           ),
         ),
@@ -873,46 +1107,29 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
 
   Marker _buildUserPinMarker(BuildContext context, {required LatLng point}) {
     final cs = context.colorScheme;
-    final tt = context.appTextStyles;
     final appColors = context.appColors;
 
+    // Chấm xanh dương kiểu Google Maps.
     return Marker(
       point: point,
-      width: 120,
-      height: 70,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: appColors.info,
-              shape: BoxShape.circle,
-              border: Border.all(color: cs.surface, width: 2),
-              boxShadow: appColors.cardShadow,
-            ),
-            child: Icon(
-              Icons.person_pin_circle_rounded,
-              color: cs.onPrimary,
-              size: 18,
-            ),
+      width: 40,
+      height: 40,
+      child: Container(
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: appColors.info.withValues(alpha: 0.18),
+        ),
+        child: Container(
+          width: 16,
+          height: 16,
+          decoration: BoxDecoration(
+            color: appColors.info,
+            shape: BoxShape.circle,
+            border: Border.all(color: cs.surface, width: 3),
+            boxShadow: appColors.cardShadow,
           ),
-          const SizedBox(height: 2),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: appColors.info,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              'Vị trí của bạn',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: tt.badgeOnPrimary,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

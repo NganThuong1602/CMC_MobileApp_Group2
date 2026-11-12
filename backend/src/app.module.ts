@@ -6,6 +6,7 @@ import {
   BookingEntity,
   ChatMessageEntity,
   ChatRoomEntity,
+  DiscountCodeEntity,
   FcmTokenEntity,
   NotificationEntity,
   OtpVerificationEntity,
@@ -22,6 +23,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { BarbersModule } from './modules/barbers/barbers.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { CommunityModule } from './modules/community/community.module';
+import { DiscountsModule } from './modules/discounts/discounts.module';
 import { MailerModule } from './modules/mailer/mailer.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -56,6 +58,7 @@ import { UploadModule } from './modules/upload/upload.module';
           ChatRoomEntity,
           ChatMessageEntity,
           NotificationEntity,
+          DiscountCodeEntity,
         ],
         synchronize: config.get<string>('DB_SYNCHRONIZE', 'true') === 'true',
         ssl:
@@ -70,6 +73,7 @@ import { UploadModule } from './modules/upload/upload.module';
     NotificationsModule,
     AuthModule,
     ShopsModule,
+    DiscountsModule,
     BarbersModule,
     BookingsModule,
     PaymentsModule,

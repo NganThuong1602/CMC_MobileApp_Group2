@@ -12,6 +12,7 @@ import {
   ReviewEntity,
   ServiceEntity,
   ShopEntity,
+  ShopPackagePlan,
   TransactionEntity,
   TransactionStatus,
   TransactionType,
@@ -619,6 +620,11 @@ export class DatabaseSeederService implements OnModuleInit {
           : highlightTargetExpiry
         : shop?.highlightExpiresAt ?? null;
 
+      const desiredExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+      const desiredPlan = spec.isHighlighted100Days
+        ? ShopPackagePlan.COOP_YEARLY
+        : ShopPackagePlan.MEMBER_YEARLY;
+
       if (!shop) {
         shop = await this.shopRepo.save(
           this.shopRepo.create({
@@ -630,14 +636,17 @@ export class DatabaseSeederService implements OnModuleInit {
             closeTime: spec.closeTime,
             latitude: spec.latitude,
             longitude: spec.longitude,
-            rating: spec.rating,
-            reviewCount: spec.reviewCount,
+            rating: 0,
+            reviewCount: 0,
             avatarUrl: spec.avatarUrl,
             coverUrl: spec.coverUrl,
             galleryUrls: spec.galleryUrls,
             description: spec.description,
             isActive: true,
             highlightExpiresAt: desiredHighlight,
+            subscriptionPlan: desiredPlan,
+            isCooperation: spec.isHighlighted100Days,
+            subscriptionExpiresAt: desiredExpiry,
           }),
         );
       } else {
@@ -657,7 +666,15 @@ export class DatabaseSeederService implements OnModuleInit {
             : spec.galleryUrls;
         shop.description = spec.description;
         shop.isActive = true;
+        if (!shop.subscriptionPlan) {
+          shop.subscriptionPlan = desiredPlan;
+          shop.isCooperation = spec.isHighlighted100Days;
+        }
+        if (!shop.subscriptionExpiresAt) {
+          shop.subscriptionExpiresAt = desiredExpiry;
+        }
         if (spec.isHighlighted100Days) {
+          shop.isCooperation = true;
           shop.highlightExpiresAt = desiredHighlight;
         }
         shop = await this.shopRepo.save(shop);
@@ -718,12 +735,27 @@ export class DatabaseSeederService implements OnModuleInit {
               isActive: true,
               bio: bSpec.bio,
               rating: bSpec.rating,
+              joinedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
             }),
           );
-        } else if (barberProfile.shopId !== shop.id) {
-          barberProfile.shopId = shop.id;
-          barberProfile.bio = bSpec.bio;
-          await this.barberRepo.save(barberProfile);
+        } else {
+          let dirty = false;
+          if (barberProfile.shopId !== shop.id) {
+            barberProfile.shopId = shop.id;
+            barberProfile.bio = bSpec.bio;
+            dirty = true;
+          }
+          if (
+            !barberProfile.joinedAt ||
+            barberProfile.joinedAt.getTime() >
+                barberProfile.createdAt.getTime() + 5 * 60 * 1000
+          ) {
+            barberProfile.joinedAt = barberProfile.createdAt;
+            dirty = true;
+          }
+          if (dirty) {
+            await this.barberRepo.save(barberProfile);
+          }
         }
       }
 
@@ -784,6 +816,19 @@ export class DatabaseSeederService implements OnModuleInit {
             'Không gian trên trục Tố Hữu thoáng mát, đặt lịch trước qua BarberSmart đến là được cắt ngay không phải đợi.',
         }),
       ]);
+    }
+
+    // Đồng bộ điểm sao & số lượng đánh giá thực từ bảng reviews cho từng quán
+    for (const s of seededShops) {
+      const revs = await this.reviewRepo.find({ where: { shopId: s.id } });
+      const count = revs.length;
+      const avg =
+        count === 0
+          ? 0
+          : Number(
+              (revs.reduce((sum, r) => sum + r.rating, 0) / count).toFixed(1),
+            );
+      await this.shopRepo.update(s.id, { rating: avg, reviewCount: count });
     }
 
     const totalPosts = await this.postRepo.count();

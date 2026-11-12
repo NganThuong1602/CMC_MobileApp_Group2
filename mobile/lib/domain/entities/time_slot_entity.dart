@@ -1,5 +1,43 @@
 import 'package:equatable/equatable.dart';
+import '../../core/enums/app_enums.dart';
 import '../../core/utils/formatters.dart';
+
+class ShiftOptionEntity extends Equatable {
+  final BookingShift shift;
+  final String label;
+  final String shiftRangeLabel;
+  final int startMinutes;
+  final int endMinutes;
+  final String? assignedRangeLabel;
+  final int bookedCount;
+  final bool isAvailable;
+  final String? unavailableReason;
+
+  const ShiftOptionEntity({
+    required this.shift,
+    required this.label,
+    required this.shiftRangeLabel,
+    required this.startMinutes,
+    required this.endMinutes,
+    this.assignedRangeLabel,
+    this.bookedCount = 0,
+    this.isAvailable = true,
+    this.unavailableReason,
+  });
+
+  @override
+  List<Object?> get props => [
+        shift,
+        label,
+        shiftRangeLabel,
+        startMinutes,
+        endMinutes,
+        assignedRangeLabel,
+        bookedCount,
+        isAvailable,
+        unavailableReason,
+      ];
+}
 
 class TimeSlotEntity extends Equatable {
   final int startMinutes;
@@ -77,20 +115,26 @@ class SlotLockEntity extends Equatable {
 class DaySlotSchedule extends Equatable {
   final DateTime date;
   final int totalDurationMinutes;
+  final ShiftOptionEntity? morningShift;
+  final ShiftOptionEntity? afternoonShift;
   final List<TimeSlotEntity> morningSlots;
   final List<TimeSlotEntity> afternoonSlots;
 
   const DaySlotSchedule({
     required this.date,
     required this.totalDurationMinutes,
-    required this.morningSlots,
-    required this.afternoonSlots,
+    this.morningShift,
+    this.afternoonShift,
+    this.morningSlots = const [],
+    this.afternoonSlots = const [],
   });
 
   @override
   List<Object?> get props => [
         date,
         totalDurationMinutes,
+        morningShift,
+        afternoonShift,
         morningSlots,
         afternoonSlots,
       ];

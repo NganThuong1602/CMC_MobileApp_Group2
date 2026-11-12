@@ -127,35 +127,6 @@ class _HomePageState extends State<HomePage> {
                       ),
                       const SizedBox(width: 8),
                       Tooltip(
-                        message: state.hasRealDeviceGps
-                            ? 'Đã kết nối GPS thật (${state.userLat.toStringAsFixed(4)}, ${state.userLng.toStringAsFixed(4)})'
-                            : 'Cập nhật vị trí GPS thực tế',
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () => context
-                              .read<ShopDiscoveryCubit>()
-                              .requestRealDeviceLocation(userId: user?.id),
-                          child: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: state.hasRealDeviceGps
-                                  ? cs.primary
-                                  : cs.primaryContainer,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Icon(
-                              Icons.my_location_rounded,
-                              color: state.hasRealDeviceGps
-                                  ? cs.onPrimary
-                                  : cs.primary,
-                              size: 20,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Tooltip(
                         message: 'Lọc theo đánh giá & khoảng cách',
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
@@ -181,6 +152,64 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ),
                         ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      ChoiceChip(
+                        avatar: Icon(
+                          Icons.storefront_rounded,
+                          size: 16,
+                          color: !state.onlyHighlightedFilter
+                              ? cs.onPrimary
+                              : cs.primary,
+                        ),
+                        label: Text(
+                          'Tất cả',
+                          style: !state.onlyHighlightedFilter
+                              ? tt.bodySmallOnPrimary
+                              : tt.bodySmallStrong,
+                        ),
+                        selected: !state.onlyHighlightedFilter,
+                        selectedColor: cs.primary,
+                        backgroundColor: cs.surfaceContainer,
+                        showCheckmark: false,
+                        onSelected: (_) {
+                          if (state.onlyHighlightedFilter) {
+                            context
+                                .read<ShopDiscoveryCubit>()
+                                .toggleHighlightedFilter(userId: user?.id);
+                          }
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        avatar: Icon(
+                          Icons.workspace_premium_rounded,
+                          size: 16,
+                          color: state.onlyHighlightedFilter
+                              ? cs.onPrimary
+                              : cs.primary,
+                        ),
+                        label: Text(
+                          'Nổi bật',
+                          style: state.onlyHighlightedFilter
+                              ? tt.bodySmallOnPrimary
+                              : tt.bodySmallStrong,
+                        ),
+                        selected: state.onlyHighlightedFilter,
+                        selectedColor: cs.primary,
+                        backgroundColor: cs.surfaceContainer,
+                        showCheckmark: false,
+                        onSelected: (_) {
+                          if (!state.onlyHighlightedFilter) {
+                            context
+                                .read<ShopDiscoveryCubit>()
+                                .toggleHighlightedFilter(userId: user?.id);
+                          }
+                        },
                       ),
                     ],
                   ),
@@ -302,35 +331,89 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 ),
-                Positioned(
-                  top: 10,
-                  right: 10,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: appColors.translucentSurface,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                if (shop.isHighlightedAt(DateTime.now()) ||
+                    shop.activeDiscountPercent > 0)
+                  Positioned(
+                    top: 10,
+                    left: 10,
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
                       children: [
-                        Icon(
-                          Icons.star_rounded,
-                          color: appColors.starRating,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          shop.rating.toStringAsFixed(1),
-                          style: tt.bodySmallStrong,
-                        ),
+                        if (shop.isHighlightedAt(DateTime.now()))
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.primary,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.workspace_premium_rounded,
+                                  size: 14,
+                                  color: cs.onPrimary,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Nổi bật',
+                                  style: tt.badgeOnPrimary,
+                                ),
+                              ],
+                            ),
+                          ),
+                        if (shop.activeDiscountPercent > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.error,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              'Giảm ${shop.activeDiscountPercent}%',
+                              style: tt.badgeOnPrimary,
+                            ),
+                          ),
                       ],
                     ),
                   ),
-                ),
+                if (shop.hasRating)
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: appColors.translucentSurface,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.star_rounded,
+                            color: appColors.starRating,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            shop.rating.toStringAsFixed(1),
+                            style: tt.bodySmallStrong,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
             Padding(

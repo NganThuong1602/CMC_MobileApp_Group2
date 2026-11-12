@@ -200,6 +200,11 @@ class AppTextStyles {
         fontWeight: FontWeight.w800,
       );
 
+  TextStyle get priceStrikethrough => _tt.bodySmall!.copyWith(
+        color: _cs.onSurfaceVariant,
+        decoration: TextDecoration.lineThrough,
+      );
+
   // Body styles
   TextStyle get bodyStrong => _tt.bodyMedium!.copyWith(
         color: _cs.onSurface,

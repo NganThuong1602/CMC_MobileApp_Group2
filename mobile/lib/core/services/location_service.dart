@@ -1,16 +1,19 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:geolocator/geolocator.dart';
 
 class DeviceLocationResult {
   final bool granted;
   final double latitude;
   final double longitude;
+  final double accuracyMeters;
   final String? errorMessage;
 
   const DeviceLocationResult({
     required this.granted,
     required this.latitude,
     required this.longitude,
+    this.accuracyMeters = 0,
     this.errorMessage,
   });
 }
@@ -32,38 +35,93 @@ class GeocodedPlaceResult {
 class LocationService {
   const LocationService();
 
-  Future<DeviceLocationResult?> requestAndGetCurrentLocation() async {
+  /// Cấu hình lấy vị trí độ chính xác cao, KHÔNG dùng vị trí cache cũ
+  /// (trên Web `maximumAge: 0` buộc trình duyệt trả về toạ độ GPS mới nhất).
+  LocationSettings _settings({int distanceFilterMeters = 0, Duration? timeLimit}) {
+    if (kIsWeb) {
+      return WebSettings(
+        accuracy: LocationAccuracy.best,
+        distanceFilter: distanceFilterMeters,
+        maximumAge: Duration.zero,
+        timeLimit: timeLimit,
+      );
+    }
+    return LocationSettings(
+      accuracy: LocationAccuracy.best,
+      distanceFilter: distanceFilterMeters,
+      timeLimit: timeLimit,
+    );
+  }
+
+  /// Kiểm tra định vị đang bật và đã được cấp quyền (không bật popup xin quyền).
+  Future<bool> isLocationAvailable() async {
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        return null;
-      }
+      if (!serviceEnabled) return false;
+      final permission = await Geolocator.checkPermission();
+      return permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse;
+    } catch (_) {
+      return false;
+    }
+  }
 
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
+  Future<bool> _ensurePermission() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return false;
 
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        return null;
-      }
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    return permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse;
+  }
+
+  Future<DeviceLocationResult?> requestAndGetCurrentLocation() async {
+    try {
+      if (!await _ensurePermission()) return null;
 
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 10),
-        ),
+        locationSettings: _settings(timeLimit: const Duration(seconds: 15)),
       );
 
       return DeviceLocationResult(
         granted: true,
         latitude: pos.latitude,
         longitude: pos.longitude,
+        accuracyMeters: pos.accuracy,
       );
     } catch (_) {
       return null;
     }
+  }
+
+  /// Lắng nghe tọa độ GPS thay đổi theo thời gian thực khi người dùng di chuyển.
+  /// Khi người dùng tắt định vị / thu hồi quyền, stream phát ra lỗi để UI ẩn chấm vị trí.
+  Stream<Position> watchRawPosition({int distanceFilterMeters = 3}) {
+    return Geolocator.getPositionStream(
+      locationSettings: _settings(distanceFilterMeters: distanceFilterMeters),
+    );
+  }
+
+  /// Lắng nghe tọa độ GPS thay đổi theo thời gian thực khi người dùng di chuyển.
+  Stream<DeviceLocationResult> watchDeviceLocation({
+    int distanceFilterMeters = 5,
+  }) async* {
+    try {
+      if (!await _ensurePermission()) return;
+    } catch (_) {
+      return;
+    }
+    yield* watchRawPosition(distanceFilterMeters: distanceFilterMeters).map(
+      (pos) => DeviceLocationResult(
+        granted: true,
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+        accuracyMeters: pos.accuracy,
+      ),
+    );
   }
 
   /// Tìm tọa độ (vĩ độ, kinh độ) trên bản đồ OpenStreetMap từ chuỗi địa chỉ người dùng nhập.

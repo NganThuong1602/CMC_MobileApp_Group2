@@ -9,4 +9,5 @@ export * from './booking.entity';
 export * from './transaction.entity';
 export * from './post.entity';
 export * from './community.entity';
+export * from './discount-code.entity';
 

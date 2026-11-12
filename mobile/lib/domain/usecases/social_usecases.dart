@@ -11,6 +11,15 @@ class GetFeedPostsUseCase {
   }
 }
 
+class GetForumPostsUseCase {
+  final SocialRepository repository;
+  const GetForumPostsUseCase(this.repository);
+
+  Future<Result<List<PostEntity>>> call() {
+    return repository.getForumPosts();
+  }
+}
+
 class CreatePostUseCase {
   final SocialRepository repository;
   const CreatePostUseCase(this.repository);

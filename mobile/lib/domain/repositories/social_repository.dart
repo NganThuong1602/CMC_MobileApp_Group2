@@ -7,6 +7,8 @@ abstract class SocialRepository {
 
   Future<Result<List<PostEntity>>> getFeedPosts({String? authorId});
 
+  Future<Result<List<PostEntity>>> getForumPosts();
+
   Future<Result<PostEntity>> createPost({
     required String authorId,
     required String content,

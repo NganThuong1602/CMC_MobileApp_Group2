@@ -34,6 +34,7 @@ class _MapPageState extends State<MapPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final cubit = context.read<ShopDiscoveryCubit>();
+      cubit.startLiveLocationTracking();
       if (!cubit.state.hasRealDeviceGps) {
         final userId = context.read<AuthCubit>().state.user?.id;
         cubit.requestRealDeviceLocation(userId: userId);
@@ -58,13 +59,12 @@ class _MapPageState extends State<MapPage> {
     final granted = await cubit.requestRealDeviceLocation(userId: userId);
     if (!mounted) return;
     final updated = cubit.state;
-    _safeMoveMap(updated.userLat, updated.userLng, zoom: 15.2);
-    if (!granted) {
+    if (granted) {
+      _safeMoveMap(updated.userLat, updated.userLng, zoom: 16);
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Chưa cấp quyền GPS thiết bị — đang hiển thị khu vực Vạn Phúc, Hà Đông.',
-          ),
+          content: Text('Vui lòng bật định vị để xem vị trí của bạn.'),
         ),
       );
     }
@@ -77,16 +77,19 @@ class _MapPageState extends State<MapPage> {
     final user = context.watch<AuthCubit>().state.user;
 
     return BlocConsumer<ShopDiscoveryCubit, ShopDiscoveryState>(
+      // Chỉ tự động đưa bản đồ về vị trí của bạn khi vừa lấy được GPS thật lần đầu
+      // (không giật bản đồ mỗi lần vị trí cập nhật để người dùng kéo xem tự do).
       listenWhen: (prev, curr) =>
           prev.filterResetRevision != curr.filterResetRevision ||
-          prev.locationUpdateRevision != curr.locationUpdateRevision ||
-          prev.userLat != curr.userLat ||
-          prev.userLng != curr.userLng,
+          (!prev.showUserLocationDot && curr.showUserLocationDot),
       listener: (context, state) {
         if (_mapSearchCtrl.text.isNotEmpty && state.searchQuery.isEmpty) {
           setState(() => _mapSearchCtrl.clear());
         }
-        _safeMoveMap(state.userLat, state.userLng, zoom: 15.0);
+        if (state.showUserLocationDot) {
+          final currentZoom = _isMapReady ? _mapController.camera.zoom : 15.0;
+          _safeMoveMap(state.userLat, state.userLng, zoom: currentZoom);
+        }
       },
       builder: (context, state) {
         final center = LatLng(state.userLat, state.userLng);
@@ -132,10 +135,11 @@ class _MapPageState extends State<MapPage> {
                       ),
                       MarkerLayer(
                         markers: [
-                          _buildUserLocationMarker(context, state),
                           ...state.nearbyShops.map(
                             (shop) => _buildShopMarker(context, shop),
                           ),
+                          if (state.showUserLocationDot)
+                            _buildUserLocationMarker(context, state),
                         ],
                       ),
                     ],
@@ -271,9 +275,11 @@ class _MapPageState extends State<MapPage> {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text(
-                                          state.hasRealDeviceGps
-                                              ? 'OSM đang lấy tâm GPS thật: (${state.userLat.toStringAsFixed(5)}, ${state.userLng.toStringAsFixed(5)})'
-                                              : 'Bản đồ OpenStreetMap (OSM) — khu vực Vạn Phúc, Hà Đông',
+                                          state.showUserLocationDot
+                                              ? state.gpsAccuracyMeters > 0
+                                                  ? 'Vị trí GPS hiện tại (sai số ±${state.gpsAccuracyMeters.round()}m)'
+                                                  : 'Bản đồ OpenStreetMap — đang hiển thị vị trí GPS của bạn'
+                                              : 'Bản đồ OpenStreetMap — định vị đang tắt',
                                         ),
                                       ),
                                     );
@@ -300,50 +306,28 @@ class _MapPageState extends State<MapPage> {
     ShopDiscoveryState state,
   ) {
     final cs = context.colorScheme;
-    final tt = context.appTextStyles;
     final appColors = context.appColors;
 
+    // Chấm xanh dương kiểu Google Maps: quầng mờ + chấm xanh viền trắng.
     return Marker(
       point: LatLng(state.userLat, state.userLng),
-      width: 136,
-      height: 82,
-      child: Tooltip(
-        message:
-            'Vị trí của bạn (${state.userLat.toStringAsFixed(5)}, ${state.userLng.toStringAsFixed(5)})',
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: appColors.info,
-                shape: BoxShape.circle,
-                border: Border.all(color: cs.surface, width: 2.5),
-                boxShadow: appColors.cardShadow,
-              ),
-              child: Icon(
-                Icons.person_pin_circle_rounded,
-                color: cs.onPrimary,
-                size: 22,
-              ),
-            ),
-            const SizedBox(height: 3),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: appColors.info,
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: appColors.cardShadow,
-              ),
-              child: Text(
-                'Vị trí của bạn',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: tt.badgeOnPrimary,
-              ),
-            ),
-          ],
+      width: 44,
+      height: 44,
+      child: Container(
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: appColors.info.withValues(alpha: 0.18),
+        ),
+        child: Container(
+          width: 18,
+          height: 18,
+          decoration: BoxDecoration(
+            color: appColors.info,
+            shape: BoxShape.circle,
+            border: Border.all(color: cs.surface, width: 3),
+            boxShadow: appColors.cardShadow,
+          ),
         ),
       ),
     );

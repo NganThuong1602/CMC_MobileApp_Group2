@@ -41,6 +41,7 @@ class SepayQrDialog extends StatefulWidget {
 class _SepayQrDialogState extends State<SepayQrDialog> {
   StreamSubscription<Map<String, dynamic>>? _sub;
   bool _simulating = false;
+  bool _completed = false;
 
   @override
   void initState() {
@@ -48,7 +49,8 @@ class _SepayQrDialogState extends State<SepayQrDialog> {
     _sub = sl<SocketService>().onPaymentSuccess.listen((event) {
       final code = (event['paymentCode'] ?? '').toString();
       if (code.isEmpty || code == widget.transaction.paymentCode) {
-        if (mounted) {
+        if (!_completed && mounted) {
+          _completed = true;
           Navigator.of(context).pop(true);
         }
       }
@@ -63,11 +65,18 @@ class _SepayQrDialogState extends State<SepayQrDialog> {
 
   Future<void> _simulateWebhook() async {
     setState(() => _simulating = true);
-    await sl<ShopRepository>().simulateSePayWebhook(
+    final res = await sl<ShopRepository>().simulateSePayWebhook(
       widget.transaction.paymentCode,
     );
     if (mounted) {
       setState(() => _simulating = false);
+      if (!_completed &&
+          res.isSuccess &&
+          res.data != null &&
+          res.data!.status.toUpperCase() == 'SUCCESS') {
+        _completed = true;
+        Navigator.of(context).pop(true);
+      }
     }
   }
 

@@ -5,7 +5,12 @@ import {
   Index,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import { HighlightPlan, TransactionStatus, TransactionType } from './enums';
+import {
+  HighlightPlan,
+  ShopPackagePlan,
+  TransactionStatus,
+  TransactionType,
+} from './enums';
 
 @Entity('transactions')
 export class TransactionEntity {
@@ -38,6 +43,14 @@ export class TransactionEntity {
     nullable: true,
   })
   highlightPlan?: HighlightPlan;
+
+  @Column({
+    name: 'package_plan',
+    type: 'enum',
+    enum: ShopPackagePlan,
+    nullable: true,
+  })
+  packagePlan?: ShopPackagePlan;
 
   @Column({ type: 'int' })
   amount!: number;

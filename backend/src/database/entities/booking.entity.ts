@@ -7,7 +7,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import { BookingStatus, PaymentMethod } from './enums';
+import { BookingShift, BookingStatus, PaymentMethod } from './enums';
 import { ShopEntity } from './shop.entity';
 import { BarberEntity } from './barber.entity';
 import { UserEntity } from './user.entity';
@@ -47,6 +47,13 @@ export class BookingEntity {
 
   @Column({ name: 'end_minutes', type: 'int' })
   endMinutes!: number;
+
+  @Column({
+    type: 'enum',
+    enum: BookingShift,
+    nullable: true,
+  })
+  shift?: BookingShift | null;
 
   @Column({ name: 'total_duration_minutes', type: 'int' })
   totalDurationMinutes!: number;

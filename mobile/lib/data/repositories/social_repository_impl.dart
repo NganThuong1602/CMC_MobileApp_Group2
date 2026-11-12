@@ -56,6 +56,64 @@ class SocialRepositoryImpl implements SocialRepository {
   }
 
   @override
+  Future<Result<List<PostEntity>>> getForumPosts() async {
+    try {
+      final list = await remote.getForumPosts();
+      return Result.success(list);
+    } catch (_) {}
+
+    final forumPosts = db.posts.where((p) {
+      if (p.authorRole == UserRole.manager) {
+        return true;
+      }
+      return db.barbers.any(
+        (b) =>
+            b.isActive &&
+            b.userId == p.authorId &&
+            (b.joinedAt == null || !p.createdAt.isBefore(b.joinedAt!)),
+      );
+    }).map((p) {
+      if (p.authorShopName != null && p.authorShopName!.isNotEmpty) {
+        return p;
+      }
+      String? shopId = p.authorShopId;
+      String? shopName = p.authorShopName;
+      if (p.authorRole == UserRole.manager) {
+        final ownedShop = db.shops.where((s) => s.ownerId == p.authorId).firstOrNull;
+        shopId ??= ownedShop?.id;
+        shopName ??= ownedShop?.name;
+      } else if (p.authorRole == UserRole.barber) {
+        final barber = db.barbers
+            .where((b) => b.isActive && b.userId == p.authorId)
+            .firstOrNull;
+        if (barber != null) {
+          final shop = db.shops.where((s) => s.id == barber.shopId).firstOrNull;
+          shopId ??= barber.shopId;
+          shopName ??= shop?.name;
+        }
+      }
+      if (shopId == p.authorShopId && shopName == p.authorShopName) {
+        return p;
+      }
+      return PostEntity(
+        id: p.id,
+        authorId: p.authorId,
+        authorName: p.authorName,
+        authorRole: p.authorRole,
+        authorAvatarUrl: p.authorAvatarUrl,
+        authorShopId: shopId,
+        authorShopName: shopName,
+        content: p.content,
+        imageUrls: p.imageUrls,
+        comments: p.comments,
+        createdAt: p.createdAt,
+      );
+    }).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return Result.success(forumPosts);
+  }
+
+  @override
   Future<Result<List<PostEntity>>> getFeedPosts({String? authorId}) async {
     try {
       final remotePosts = await remote.getFeedPosts(authorId: authorId);

@@ -12,6 +12,7 @@ abstract class ShopRepository {
     double? userLng,
     String? searchQuery,
     double? minRating,
+    bool onlyHighlighted = false,
   });
 
   Future<Result<List<ShopEntity>>> getHighlightedShops();
@@ -23,6 +24,33 @@ abstract class ShopRepository {
   Future<Result<List<ServiceEntity>>> getShopServices(String shopId);
 
   Future<Result<List<BarberEntity>>> getShopBarbers(String shopId);
+
+  Future<Result<RegisterShopCredit>> getRegisterShopCredit();
+
+  Future<Result<PaymentTransactionEntity>> createPackageRegistrationPayment({
+    required String userId,
+    required ShopPackagePlan packagePlan,
+  });
+
+  Future<Result<ShopEntity>> submitShopRegistrationAfterPayment({
+    required String userId,
+    required String paymentCode,
+    required String name,
+    required String address,
+    required String phone,
+    required String description,
+    required String openTime,
+    required String closeTime,
+    required double latitude,
+    required double longitude,
+    String? coverImageUrl,
+  });
+
+  Future<Result<PaymentTransactionEntity>> createRenewShopPayment({
+    required String userId,
+    required String shopId,
+    required ShopPackagePlan packagePlan,
+  });
 
   Future<Result<PaymentTransactionEntity>> createRegisterShopPayment({
     required String userId,
@@ -82,5 +110,17 @@ abstract class ShopRepository {
   Future<Result<ShopEntity>> approveShopByAdmin(String shopId);
 
   Future<Result<void>> deleteShopByAdmin(String shopId);
+
+  Future<Result<List<DiscountCodeEntity>>> getDiscountCodes();
+
+  Future<Result<DiscountCodeEntity>> createDiscountCode({
+    required String name,
+    String? code,
+    required int discountPercent,
+    required DateTime startAt,
+    required DateTime endAt,
+  });
+
+  Future<Result<void>> deleteDiscountCode(String id);
 }
 

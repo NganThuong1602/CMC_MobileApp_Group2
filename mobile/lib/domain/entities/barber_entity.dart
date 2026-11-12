@@ -13,6 +13,7 @@ class BarberEntity extends Equatable {
   final int baseSalary;
   final bool isActive;
   final bool invitationAccepted;
+  final DateTime? joinedAt;
 
   const BarberEntity({
     required this.id,
@@ -27,6 +28,7 @@ class BarberEntity extends Equatable {
     this.baseSalary = 6000000,
     this.isActive = true,
     this.invitationAccepted = true,
+    this.joinedAt,
   });
 
   BarberEntity copyWith({
@@ -47,6 +49,7 @@ class BarberEntity extends Equatable {
       baseSalary: baseSalary ?? this.baseSalary,
       isActive: isActive ?? this.isActive,
       invitationAccepted: invitationAccepted ?? this.invitationAccepted,
+      joinedAt: joinedAt,
     );
   }
 

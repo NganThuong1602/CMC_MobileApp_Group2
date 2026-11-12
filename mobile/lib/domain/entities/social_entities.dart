@@ -32,6 +32,8 @@ class PostEntity extends Equatable {
   final String authorName;
   final UserRole authorRole;
   final String? authorAvatarUrl;
+  final String? authorShopId;
+  final String? authorShopName;
   final String content;
   final List<String> imageUrls; // Tối đa 5 ảnh (Cloudinary)
   final List<PostCommentEntity> comments;
@@ -43,6 +45,8 @@ class PostEntity extends Equatable {
     required this.authorName,
     required this.authorRole,
     this.authorAvatarUrl,
+    this.authorShopId,
+    this.authorShopName,
     required this.content,
     required this.imageUrls,
     required this.comments,
@@ -53,6 +57,8 @@ class PostEntity extends Equatable {
   List<Object?> get props => [
         id,
         authorId,
+        authorShopId,
+        authorShopName,
         content,
         imageUrls,
         comments,

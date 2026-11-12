@@ -36,6 +36,7 @@ class CreateBookingUseCase {
     required List<String> serviceIds,
     required DateTime date,
     required int startMinutes,
+    BookingShift? shift,
     required PaymentMethod paymentMethod,
   }) {
     return repository.createBooking(
@@ -45,6 +46,7 @@ class CreateBookingUseCase {
       serviceIds: serviceIds,
       date: date,
       startMinutes: startMinutes,
+      shift: shift,
       paymentMethod: paymentMethod,
     );
   }

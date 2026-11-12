@@ -363,7 +363,8 @@ class InMemoryDatabase {
     ]);
 
     // 4. Seed Barbers
-    barbers.addAll(const [
+    final defaultJoinedAt = DateTime.now().subtract(const Duration(days: 30));
+    barbers.addAll([
       BarberEntity(
         id: 'barber_1',
         userId: 'u_barber_1',
@@ -377,6 +378,7 @@ class InMemoryDatabase {
         rating: 4.9,
         baseSalary: 7000000,
         isActive: true,
+        joinedAt: defaultJoinedAt,
       ),
       BarberEntity(
         id: 'barber_2',
@@ -391,6 +393,7 @@ class InMemoryDatabase {
         rating: 4.8,
         baseSalary: 6500000,
         isActive: true,
+        joinedAt: defaultJoinedAt,
       ),
       BarberEntity(
         id: 'barber_3',
@@ -403,6 +406,7 @@ class InMemoryDatabase {
         rating: 4.9,
         baseSalary: 7500000,
         isActive: true,
+        joinedAt: defaultJoinedAt,
       ),
     ]);
 

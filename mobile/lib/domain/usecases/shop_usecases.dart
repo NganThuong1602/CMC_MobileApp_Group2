@@ -11,12 +11,14 @@ class GetNearbyShopsUseCase {
     double? userLng,
     String? searchQuery,
     double? minRating,
+    bool onlyHighlighted = false,
   }) {
     return repository.getNearbyShops(
       userLat: userLat,
       userLng: userLng,
       searchQuery: searchQuery,
       minRating: minRating,
+      onlyHighlighted: onlyHighlighted,
     );
   }
 }

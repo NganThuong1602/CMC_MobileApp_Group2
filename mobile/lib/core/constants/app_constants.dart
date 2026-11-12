@@ -47,10 +47,13 @@ class AppConstants {
   static const String platformBankAccount = '101886339075';
   static const String platformBankOwner = 'BARBERSMART PLATFORM';
 
-  // Cấu hình Nghiệp vụ Đặt lịch (Clarification A2)
-  static const int slotIntervalMinutes = 15; // Bước nhảy 15 phút
-  static const int lunchStartMinutes = 11 * 60 + 30; // 11:30 (690p)
-  static const int lunchEndMinutes = 14 * 60; // 14:00 (840p)
+  // Cấu hình Nghiệp vụ Đặt lịch theo Ca sáng / Ca chiều
+  static const int bookingGapMinutes = 5; // Mỗi khách cách nhau 5 phút
+  static const int morningShiftEndMinutes = 12 * 60; // 12:00 (720p)
+  static const int afternoonShiftStartMinutes = 13 * 60 + 30; // 13:30 (810p)
+  static const int slotIntervalMinutes = 15;
+  static const int lunchStartMinutes = morningShiftEndMinutes;
+  static const int lunchEndMinutes = afternoonShiftStartMinutes;
   static const int slotLockTtlMinutes = 5;
 
   // Cấu hình Hoa hồng Barber & Mạng xã hội

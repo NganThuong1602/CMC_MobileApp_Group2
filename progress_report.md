@@ -1,6 +1,6 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN: BARBERSMART (FULLSTACK NESTJS + SUPABASE + FLUTTER)
 
-> **Cập nhật lần cuối:** 10/11/2026 (Bản cập nhật v3.6: Giữ nguyên màn hình Trạng thái & Thông tin Đăng ký Quán khi thoát ra vào lại cho đến khi được duyệt hoặc bị Admin từ chối, Đồng bộ SePay Webhook tạo quán Chờ duyệt & gửi Thông báo thật tới Role Admin ngay lập tức, và Chuẩn hoá Validate Số điện thoại 10 chữ số theo đúng 28 đầu số nhà mạng Việt Nam)  
+> **Cập nhật lần cuối:** 12/11/2026 (Bản cập nhật v4.0: Đổi "Nổi bật" -> "Diễn đàn" lọc bài đăng Barber từ `joinedAt`; Luồng Đăng ký quán mới 4 Gói Thành viên/Hợp tác -> Thanh toán QR SePay -> Điền form -> Admin duyệt & Gia hạn/Tự động xoá; Admin thêm Mã giảm giá tự động áp cho quán Hợp tác & xem chi tiết hồ sơ + bản đồ; Ưu tiên quán Nổi bật + Filter Trang chủ; Đánh giá sao thực tế ẩn khi 0 đánh giá; Xếp lịch tự động theo Ca sáng/Ca chiều + fix `ListTile` Web; Định vị GPS thời gian thực)  
 > **Trạng thái tổng thể:** Đã hoàn thiện 100% mã nguồn Fullstack (`backend/` NestJS + Supabase PostgreSQL IPv4 Session Pooler + TypeORM + Socket.IO + SePay + Nodemailer + Cloudinary + FCM) và Mobile App (`mobile/` Flutter Clean Architecture + Centralized Design System `AppTheme` + `google_fonts` Inter + `flutter_bloc` + `get_it` + `dio` + `go_router` + `image_picker` + `geolocator` + `flutter_map` OSM), vượt qua toàn bộ kiểm tra `nest build` và `dart analyze` (`No issues found!`).
 
 ---
@@ -138,10 +138,43 @@
   - Xoá hoàn toàn dòng chữ màu xanh *"Chạm vào ảnh để mở Trang cá nhân & Mạng xã hội"* dưới thông tin tài khoản trên trang `Hồ Sơ` (`AccountPage`).
   - Rút gọn các dòng subtitle và nhãn hướng dẫn thừa như *"• Bấm để xem chi tiết"*, *"• Bấm để xem trạng thái & thông tin đã đăng ký"*, *"(Chạm vào bản đồ để chỉnh)"*, *"(Chạm để xác nhận TT)"*, *"Bấm để xem thông tin quán bạn đã điền"* thành văn bản tự nhiên, tinh gọn và chuyên nghiệp chuẩn các ứng dụng di động hàng đầu hiện nay.
 
+### 12. Bản cập nhật v4.0 — Diễn đàn Barber, Luồng Đăng ký Gói Quán -> QR SePay -> Điền Form -> Admin Duyệt/Gia hạn, Mã giảm giá Admin, Đánh giá sao thực tế, Xếp lịch theo Ca tự động & Định vị GPS thời gian thực
+- **1. Đổi trang "Nổi bật" thành "Diễn đàn" (`highlights_page.dart`, `role_bottom_nav_bar.dart`, `main_shell_page.dart`, `community.module.ts`, `barbers.module.ts`, `seeder.module.ts`):**
+  - Đổi tên tab điều hướng thành **`Diễn đàn`** (`Icons.forum_outlined` / `Icons.forum_rounded`).
+  - Endpoint `GET /api/v1/posts/forum` và `GetForumPostsUseCase` chỉ lấy các bài đăng của tài khoản đang giữ vai trò **`BARBER`**, với điều kiện `post.createdAt >= barber.joinedAt`, sắp xếp từ mới nhất đến cũ nhất (`DESC`). Khi một người dùng đăng bài trước khi trở thành Barber, bài cũ không xuất hiện ở Diễn đàn (chỉ hiện các bài đăng từ thời điểm trở thành Barber trở đi).
+- **2. Luồng Đăng ký Quán 3 bước mới (Chọn 1 trong 4 Gói -> Thanh toán QR SePay -> Điền Form -> Chờ Admin duyệt), Gia hạn & Tự động gỡ quán hết hạn (`register_shop_page.dart`, `my_shop_page.dart`, `payments.module.ts`, `shops.module.ts`, `app_enums.dart`):**
+  - Thiết lập 4 gói `ShopPackagePlan`: **Thành viên 1 tháng (`500.000đ`)**, **Thành viên 1 năm (`5.000.000đ`)**, **Hợp tác 1 tháng (`300.000đ`)**, **Hợp tác 1 năm (`3.000.000đ`)** kèm bảng quyền lợi rõ ràng.
+  - Bước 1 chọn gói & quét QR SePay thanh toán trước (`POST /api/v1/payments/register-shop-qr`). Thanh toán xong mở khoá Bước 2 (`GET /api/v1/payments/register-shop-credit`) để điền thông tin quán và bấm **Xác nhận & Gửi duyệt mở quán** (`POST /api/v1/shops/register-after-payment`), chuyển sang Bước 3 (**Chờ duyệt / Đã duyệt**).
+  - Bỏ nút mua Nổi bật `1h/1d/3d` cũ trong `Quản lý thông tin` của Manager; thay bằng thẻ **Trạng thái gói quán hiện tại**, cảnh báo khi còn `<= 7 ngày` hết hạn, và danh sách **Gia hạn gói quán qua SePay** (`POST /api/v1/payments/renew-shop-qr`). Backend tự động gửi thông báo nhắc gia hạn và tự động gỡ quán quá hạn chưa gia hạn.
+- **3. Quản trị Admin: "Thêm mã giảm giá" tự động áp dụng cho Gói Hợp tác & Xem đầy đủ Hồ sơ quán chờ duyệt (`admin_hub_page.dart`, `discounts.module.ts`, `shops.module.ts`):**
+  - Thêm mục **`Thêm mã giảm giá`** trong `AdminHubPage` (`GET /api/v1/discounts`, `POST /api/v1/discounts/admin`, `DELETE /api/v1/discounts/:id`) với validate inline (`errorText`) và bộ chọn ngày/giờ bắt đầu – kết thúc. Chương trình giảm giá đang hiệu lực tự động áp dụng cho toàn bộ quán dùng **Gói Hợp tác** (hiển thị badge `-X%` & giá gạch ngang trên Trang chủ, Chi tiết quán, và tính trực tiếp khi Đặt lịch).
+  - Nâng cấp danh sách **Duyệt mở quán (Chờ duyệt)** cho phép bấm vào hồ sơ để mở trang/sheet chi tiết đầy đủ toàn bộ thông tin đã nhập: ảnh bìa lớn, tên, địa chỉ, bản đồ OSM với pin vị trí, số điện thoại, giờ mở/đóng cửa, mô tả, tên gói, thông tin thanh toán SePay và tài khoản người đăng ký.
+- **4. Ưu tiên Quán Nổi bật ở đầu Trang chủ & Bộ lọc Nổi bật (`home_page.dart`, `map_page.dart`, `shop_filter_bottom_sheet.dart`, `shop_discovery_cubit.dart`):**
+  - Quán Gói Hợp tác / Nổi bật luôn được xếp ưu tiên lên đầu danh sách Trang chủ, gắn badge `Nổi bật` và badge `Giảm X%`.
+  - Bổ sung thanh chọn nhanh **`Tất cả` / `Nổi bật`** trên Trang chủ và tuỳ chọn **`Chỉ hiện quán Nổi bật (Gói Hợp tác)`** trong `ShopFilterBottomSheet` (`GET /api/v1/shops/nearby?onlyHighlighted=true`).
+- **5. Đánh giá sao trung bình thực tế từ khách hàng (`shops.module.ts`, `community.module.ts`, `shop_entity.dart`, `home_page.dart`, `shop_detail_bottom_sheet.dart`, `admin_hub_page.dart`):**
+  - Đồng bộ tính điểm trung bình thực tế từ bảng `reviews` (`reviewCount == 0` -> `rating = 0`). Quán mới hoặc quán có `0` đánh giá sẽ ẩn hoàn toàn biểu tượng ngôi sao trên thẻ và tiêu đề quán (`shop.hasRating`).
+- **6. Đặt lịch tự động theo Ca sáng / Ca chiều (`BookingShift`) & Fix lỗi Web `ListTile` (`booking_flow_page.dart`, `booking_bloc.dart`, `booking_slot_calculator.dart`, `bookings.module.ts`):**
+  - Thay lưới giờ 15 phút bằng giao diện chọn **`Ca sáng`** (`giờ mở cửa -> 12:00`) và **`Ca chiều`** (`13:30 -> giờ đóng cửa`). Hệ thống tự động xếp khung giờ phục vụ cho từng khách và cộng khoảng nghỉ **5 phút** sau khách trước (hết chỗ trước giờ đóng ca sẽ khoá ca và báo lý do).
+  - Bọc `CheckboxListTile` / `ListTile` bằng `Material` đúng chuẩn Material Design để loại bỏ hoàn toàn cảnh báo console trên Flutter Web.
+- **7. Định vị GPS di chuyển theo thời gian thực (`location_service.dart`, `shop_discovery_cubit.dart`, `map_page.dart`):**
+  - Bổ sung stream cập nhật vị trí liên tục (`Geolocator.getPositionStream`) giúp chấm xanh pin **`"Vị trí của bạn"`** tự động di chuyển và cập nhật khoảng cách trên `MapPage` theo thời gian thực.
+
+### 13. Bản cập nhật v4.1 — Tối giản Trang chủ & Bộ lọc, Chấm xanh GPS thật kiểu Google Maps & Diễn đàn hiện thêm bài đăng Manager
+- **Trang chủ (`home_page.dart`):** Bỏ nút định vị cạnh nút Filter; bỏ dòng `Chỉ quán Nổi bật` + `Xoá lọc` khi chọn tab `Nổi bật` (tab Nổi bật không còn tính là bộ lọc — `ShopDiscoveryState.hasActiveFilter` chỉ gồm Đánh giá & Khoảng cách).
+- **Bộ lọc (`shop_filter_bottom_sheet.dart`):** Bỏ công tắc `Chỉ hiện quán Nổi bật (Gói Hợp tác)`; `Xoá lọc` giữ nguyên tab `Tất cả`/`Nổi bật` đang chọn.
+- **Vị trí GPS thật (`location_service.dart`, `shop_discovery_cubit.dart`, `map_page.dart`, `register_shop_page.dart`):**
+  - Lấy toạ độ độ chính xác cao `LocationAccuracy.best`, trên Web dùng `WebSettings(maximumAge: Duration.zero)` để không dùng vị trí cache cũ, đồng thời ghi nhận `accuracyMeters` (`gpsAccuracyMeters`) để kiểm tra sai số khi bấm nút thông tin bản đồ.
+  - Vị trí của bạn hiển thị bằng **chấm xanh dương viền trắng + quầng mờ** như Google Maps (bỏ pin & nhãn "Vị trí của bạn").
+  - Tự động giám sát bật/tắt định vị mỗi 3 giây: **tắt định vị / thu hồi quyền → ẩn chấm xanh ngay**, bật lại → tự lấy lại GPS và hiện chấm xanh. Bản đồ chỉ tự căn giữa khi vừa có GPS lần đầu hoặc khi bấm nút định vị (không giật bản đồ mỗi lần cập nhật).
+  - Xoá hàm `setCustomUserLocation` (đặt vị trí giả) để chấm xanh luôn là vị trí GPS thật.
+- **Diễn đàn (`community.module.ts`, `social_repository_impl.dart`, `highlights_page.dart`):** Mở rộng `GET /api/v1/posts/forum` và fallback offline để hiển thị thêm toàn bộ bài đăng của tài khoản giữ vai trò **`MANAGER`** (gắn kèm tên quán quản lý `authorShopName` và huy hiệu cửa tiệm), song song với bài đăng của **`BARBER`** từ thời điểm `joinedAt`.
+- **Header (`barbersmart_header.dart`):** Nút tròn góc trên bên phải của `BarberSmartHeader` tự động lấy `user.avatarUrl` từ `AuthCubit` (hoặc `AppConstants.defaultAvatarUrl` nếu tài khoản chưa tải ảnh, kèm fallback về icon user mặc định khi chưa đăng nhập hoặc tải ảnh lỗi) để hiển thị ảnh đại diện thật của tài khoản đang đăng nhập trên toàn bộ các tab chính.
+
 ---
 
 ## 🚧 Đang làm dở
-- **Không có hạng mục nào dở dang.** Toàn bộ Backend và Mobile đã hoàn tất đồng bộ và vượt qua Self-Testing.
+- Không có mục nào đang làm dở. Toàn bộ các hạng mục đến **v4.1** đã hoàn thiện, vượt qua `nest build`, kiểm thử API trực tiếp với Supabase PostgreSQL (`GET /posts/forum` trả về cả `BARBER` và `MANAGER`) và `dart analyze` (`No issues found!`).
 
 ---
 

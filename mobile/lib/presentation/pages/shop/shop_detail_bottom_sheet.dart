@@ -257,40 +257,90 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                                 style: tt.bodySmallMuted,
                               ),
                               const SizedBox(height: 6),
-                              InkWell(
-                                borderRadius: BorderRadius.circular(20),
-                                onTap: () {
-                                  Navigator.of(context).pop();
-                                  widget.onDirectionsTap?.call();
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: cs.primaryContainer,
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  InkWell(
                                     borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: cs.primary.withValues(alpha: 0.35),
+                                    onTap: () {
+                                      Navigator.of(context).pop();
+                                      widget.onDirectionsTap?.call();
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: cs.primaryContainer,
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(
+                                          color:
+                                              cs.primary.withValues(alpha: 0.35),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.near_me_rounded,
+                                            size: 13,
+                                            color: cs.primary,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Chỉ đường',
+                                            style: tt.badgePrimary,
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.near_me_rounded,
-                                        size: 13,
-                                        color: cs.primary,
+                                  if (widget.shop.hasRating)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
                                       ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'Chỉ đường',
-                                        style: tt.badgePrimary,
+                                      decoration: BoxDecoration(
+                                        color: cs.surfaceContainer,
+                                        borderRadius: BorderRadius.circular(20),
                                       ),
-                                    ],
-                                  ),
-                                ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.star_rounded,
+                                            size: 14,
+                                            color: context.appColors.starRating,
+                                          ),
+                                          const SizedBox(width: 3),
+                                          Text(
+                                            widget.shop.rating
+                                                .toStringAsFixed(1),
+                                            style: tt.captionStrong,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  if (widget.shop.activeDiscountPercent > 0)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: cs.error,
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: Text(
+                                        'Giảm ${widget.shop.activeDiscountPercent}%',
+                                        style: tt.badgeOnPrimary,
+                                      ),
+                                    ),
+                                ],
                               ),
                             ],
                           ),
@@ -412,6 +462,7 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
   Widget _buildServicesTab(BuildContext context, ScrollController ctrl) {
     final cs = context.colorScheme;
     final tt = context.appTextStyles;
+    final discountPct = widget.shop.activeDiscountPercent;
 
     return ListView.separated(
       controller: ctrl,
@@ -420,6 +471,8 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (_, i) {
         final s = _services[i];
+        final discountedPrice = widget.shop.discountedPriceOf(s.price);
+        final hasDiscount = discountPct > 0 && discountedPrice < s.price;
         return Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -444,10 +497,46 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                   ],
                 ),
               ),
-              Text(
-                AppFormatters.formatVnd(s.price),
-                style: tt.pricePrimary,
-              ),
+              if (hasDiscount)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: cs.error,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '-$discountPct%',
+                            style: tt.badgeOnPrimary,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          AppFormatters.formatVnd(s.price),
+                          style: tt.priceStrikethrough,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      AppFormatters.formatVnd(discountedPrice),
+                      style: tt.pricePrimary,
+                    ),
+                  ],
+                )
+              else
+                Text(
+                  AppFormatters.formatVnd(s.price),
+                  style: tt.pricePrimary,
+                ),
             ],
           ),
         );

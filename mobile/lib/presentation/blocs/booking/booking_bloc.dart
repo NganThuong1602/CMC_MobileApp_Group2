@@ -54,6 +54,14 @@ class BookingDateChanged extends BookingEvent {
   List<Object?> get props => [date];
 }
 
+class BookingShiftSelected extends BookingEvent {
+  final ShiftOptionEntity shiftOption;
+  const BookingShiftSelected(this.shiftOption);
+
+  @override
+  List<Object?> get props => [shiftOption];
+}
+
 class BookingSlotSelected extends BookingEvent {
   final TimeSlotEntity slot;
   const BookingSlotSelected(this.slot);
@@ -84,10 +92,12 @@ class BookingState extends Equatable {
   final List<ServiceEntity> services;
   final BarberEntity? selectedBarber;
   final List<ServiceEntity> selectedServices;
+  final int rawTotalPrice;
   final int totalPrice;
   final int totalDurationMinutes;
   final DateTime selectedDate;
   final DaySlotSchedule? daySchedule;
+  final ShiftOptionEntity? selectedShift;
   final TimeSlotEntity? selectedSlot;
   final PaymentMethod paymentMethod;
   final bool isLoading;
@@ -101,10 +111,12 @@ class BookingState extends Equatable {
     this.services = const [],
     this.selectedBarber,
     this.selectedServices = const [],
+    this.rawTotalPrice = 0,
     this.totalPrice = 0,
     this.totalDurationMinutes = 0,
     required this.selectedDate,
     this.daySchedule,
+    this.selectedShift,
     this.selectedSlot,
     this.paymentMethod = PaymentMethod.atShop,
     this.isLoading = false,
@@ -126,10 +138,12 @@ class BookingState extends Equatable {
     List<ServiceEntity>? services,
     BarberEntity? selectedBarber,
     List<ServiceEntity>? selectedServices,
+    int? rawTotalPrice,
     int? totalPrice,
     int? totalDurationMinutes,
     DateTime? selectedDate,
     DaySlotSchedule? daySchedule,
+    ShiftOptionEntity? selectedShift,
     TimeSlotEntity? selectedSlot,
     bool clearSelectedSlot = false,
     PaymentMethod? paymentMethod,
@@ -144,10 +158,13 @@ class BookingState extends Equatable {
       services: services ?? this.services,
       selectedBarber: selectedBarber ?? this.selectedBarber,
       selectedServices: selectedServices ?? this.selectedServices,
+      rawTotalPrice: rawTotalPrice ?? this.rawTotalPrice,
       totalPrice: totalPrice ?? this.totalPrice,
       totalDurationMinutes: totalDurationMinutes ?? this.totalDurationMinutes,
       selectedDate: selectedDate ?? this.selectedDate,
       daySchedule: daySchedule ?? this.daySchedule,
+      selectedShift:
+          clearSelectedSlot ? null : (selectedShift ?? this.selectedShift),
       selectedSlot:
           clearSelectedSlot ? null : (selectedSlot ?? this.selectedSlot),
       paymentMethod: paymentMethod ?? this.paymentMethod,
@@ -165,10 +182,12 @@ class BookingState extends Equatable {
         services,
         selectedBarber,
         selectedServices,
+        rawTotalPrice,
         totalPrice,
         totalDurationMinutes,
         selectedDate,
         daySchedule,
+        selectedShift,
         selectedSlot,
         paymentMethod,
         isLoading,
@@ -191,6 +210,7 @@ class BookingBloc extends Bloc<BookingEvent, BookingState> {
     on<BookingBarberSelected>(_onBarberSelected);
     on<BookingServiceToggled>(_onServiceToggled);
     on<BookingDateChanged>(_onDateChanged);
+    on<BookingShiftSelected>(_onShiftSelected);
     on<BookingSlotSelected>(_onSlotSelected);
     on<BookingPaymentMethodChanged>(_onPaymentMethodChanged);
     on<BookingSubmitted>(_onSubmitted);
@@ -225,7 +245,12 @@ class BookingBloc extends Bloc<BookingEvent, BookingState> {
     }
 
     final initialServices = services.isNotEmpty ? [services.first] : <ServiceEntity>[];
-    final summary = calculator.calculateServicesSummary(initialServices);
+    final discountPct = shopRes.data?.activeDiscountPercent ?? 0;
+    final rawTotal = initialServices.fold<int>(0, (s, item) => s + item.price);
+    final summary = calculator.calculateServicesSummary(
+      initialServices,
+      discountPercent: discountPct,
+    );
 
     DaySlotSchedule? schedule;
     if (initialBarber != null) {
@@ -246,6 +271,7 @@ class BookingBloc extends Bloc<BookingEvent, BookingState> {
         services: services,
         selectedBarber: initialBarber,
         selectedServices: initialServices,
+        rawTotalPrice: rawTotal,
         totalPrice: summary.totalPrice,
         totalDurationMinutes: summary.totalDurationMinutes,
         daySchedule: schedule,
@@ -293,10 +319,16 @@ class BookingBloc extends Bloc<BookingEvent, BookingState> {
     } else {
       current.add(event.service);
     }
-    final summary = calculator.calculateServicesSummary(current);
+    final rawTotal = current.fold<int>(0, (s, item) => s + item.price);
+    final discountPct = state.shop?.activeDiscountPercent ?? 0;
+    final summary = calculator.calculateServicesSummary(
+      current,
+      discountPercent: discountPct,
+    );
     emit(
       state.copyWith(
         selectedServices: current,
+        rawTotalPrice: rawTotal,
         totalPrice: summary.totalPrice,
         totalDurationMinutes: summary.totalDurationMinutes,
         clearSelectedSlot: true,
@@ -311,6 +343,14 @@ class BookingBloc extends Bloc<BookingEvent, BookingState> {
   ) async {
     emit(state.copyWith(selectedDate: event.date, clearSelectedSlot: true));
     await _refreshSchedule(emit);
+  }
+
+  void _onShiftSelected(
+    BookingShiftSelected event,
+    Emitter<BookingState> emit,
+  ) {
+    if (!event.shiftOption.isAvailable) return;
+    emit(state.copyWith(selectedShift: event.shiftOption));
   }
 
   void _onSlotSelected(
@@ -332,14 +372,16 @@ class BookingBloc extends Bloc<BookingEvent, BookingState> {
     BookingSubmitted event,
     Emitter<BookingState> emit,
   ) async {
+    final selectedShift = state.selectedShift;
+    final selectedSlot = state.selectedSlot;
     if (state.shop == null ||
         state.selectedBarber == null ||
         state.selectedServices.isEmpty ||
-        state.selectedSlot == null) {
+        (selectedShift == null && selectedSlot == null)) {
       emit(
         state.copyWith(
           errorMessage:
-              'Vui lòng chọn đầy đủ Barber, Dịch vụ và Khung giờ còn trống!',
+              'Vui lòng chọn đầy đủ Barber, Dịch vụ và Ca cắt còn trống!',
         ),
       );
       return;
@@ -352,7 +394,8 @@ class BookingBloc extends Bloc<BookingEvent, BookingState> {
       customerId: event.customerId,
       serviceIds: state.selectedServices.map((s) => s.id).toList(),
       date: state.selectedDate,
-      startMinutes: state.selectedSlot!.startMinutes,
+      startMinutes: selectedShift?.startMinutes ?? selectedSlot!.startMinutes,
+      shift: selectedShift?.shift,
       paymentMethod: state.paymentMethod,
     );
 

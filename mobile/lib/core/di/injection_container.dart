@@ -108,6 +108,7 @@ Future<void> initDependencies() async {
     () => GetBarberIncomeSummaryUseCase(sl<BarberRepository>()),
   );
   sl.registerLazySingleton(() => GetFeedPostsUseCase(sl<SocialRepository>()));
+  sl.registerLazySingleton(() => GetForumPostsUseCase(sl<SocialRepository>()));
   sl.registerLazySingleton(() => CreatePostUseCase(sl<SocialRepository>()));
 
   // Presentation BLoCs / Cubits

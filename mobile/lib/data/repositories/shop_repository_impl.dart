@@ -62,6 +62,45 @@ class ShopRepositoryImpl implements ShopRepository {
     }
   }
 
+  static final List<DiscountCodeEntity> _offlineDiscountCodes = [];
+  static final Map<String, ShopPackagePlan> _pendingPackageByPaymentCode = {};
+  static final Map<
+      String,
+      ({
+        ShopPackagePlan packagePlan,
+        String paymentCode,
+        int amount,
+        DateTime paidAt,
+      })> _paidCreditByUserId = {};
+  static final Map<String, ({String shopId, ShopPackagePlan packagePlan})>
+      _pendingRenewByPaymentCode = {};
+
+  void _syncActiveDiscountsToOfflineShops() {
+    final now = DateTime.now();
+    final active = _offlineDiscountCodes
+        .where(
+          (d) =>
+              d.isActive && !now.isBefore(d.startAt) && !now.isAfter(d.endAt),
+        )
+        .toList()
+      ..sort((a, b) => b.discountPercent.compareTo(a.discountPercent));
+    final best = active.isNotEmpty ? active.first : null;
+    for (var i = 0; i < db.shops.length; i++) {
+      final s = db.shops[i];
+      if (s.isCooperation && s.isActive) {
+        db.shops[i] = s.copyWith(
+          activeDiscountPercent: best?.discountPercent ?? 0,
+          activeDiscountName: best?.name,
+          activeDiscountCode: best?.code,
+        );
+      } else if (s.activeDiscountPercent != 0) {
+        db.shops[i] = s.copyWith(
+          activeDiscountPercent: 0,
+        );
+      }
+    }
+  }
+
   String _extractDioError(DioException e, String fallback) {
     final data = e.response?.data;
     if (data is Map && data['message'] != null) {
@@ -77,6 +116,7 @@ class ShopRepositoryImpl implements ShopRepository {
     double? userLng,
     String? searchQuery,
     double? minRating,
+    bool onlyHighlighted = false,
   }) async {
     try {
       final remoteList = await remote.getNearbyShops(
@@ -84,37 +124,63 @@ class ShopRepositoryImpl implements ShopRepository {
         lng: userLng,
         search: searchQuery,
         minRating: minRating,
+        onlyHighlighted: onlyHighlighted,
       );
       for (final s in remoteList) {
         _syncShopToLocal(s);
       }
-      return Result.success(remoteList);
+      var list = remoteList.where((s) => s.isActive).toList();
+      if (onlyHighlighted) {
+        final now = DateTime.now();
+        list = list.where((s) => s.isHighlightedAt(now)).toList();
+      }
+      return Result.success(list);
     } catch (_) {}
 
-    final lat = userLat ?? AppConstants.defaultLat;
-    final lng = userLng ?? AppConstants.defaultLng;
-    final query = (searchQuery ?? '').trim().toLowerCase();
-
-    var result = db.shops.map((shop) {
-      final dist = db.calculateDistanceKm(
-        lat,
-        lng,
-        shop.latitude,
-        shop.longitude,
-      );
-      return shop.copyWith(
-        distanceKm: double.parse(dist.toStringAsFixed(1)),
-      );
-    }).where((shop) {
-      if (!shop.isActive) return false;
-      if (minRating != null && shop.rating < minRating) return false;
-      if (query.isEmpty) return true;
-      return shop.name.toLowerCase().contains(query) ||
-          shop.address.toLowerCase().contains(query);
-    }).toList();
-
-    result.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
-    return Result.success(result);
+    _syncActiveDiscountsToOfflineShops();
+    final now = DateTime.now();
+    var list = db.shops.where((s) => s.isActive).toList();
+    if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+      final q = searchQuery.trim().toLowerCase();
+      list = list
+          .where(
+            (s) =>
+                s.name.toLowerCase().contains(q) ||
+                s.address.toLowerCase().contains(q),
+          )
+          .toList();
+    }
+    if (minRating != null) {
+      list = list.where((s) => s.reviewCount > 0 && s.rating >= minRating).toList();
+    }
+    if (onlyHighlighted) {
+      list = list.where((s) => s.isHighlightedAt(now)).toList();
+    }
+    if (userLat != null && userLng != null) {
+      list = list
+          .map(
+            (s) => s.copyWith(
+              distanceKm: double.parse(
+                db
+                    .calculateDistanceKm(
+                      userLat,
+                      userLng,
+                      s.latitude,
+                      s.longitude,
+                    )
+                    .toStringAsFixed(1),
+              ),
+            ),
+          )
+          .toList();
+    }
+    list.sort((a, b) {
+      final ha = a.isHighlightedAt(now) ? 1 : 0;
+      final hb = b.isHighlightedAt(now) ? 1 : 0;
+      if (ha != hb) return hb.compareTo(ha);
+      return a.distanceKm.compareTo(b.distanceKm);
+    });
+    return Result.success(list);
   }
 
   @override
@@ -482,6 +548,75 @@ class ShopRepositoryImpl implements ShopRepository {
             createdAt: DateTime.now(),
           ),
         );
+      } else {
+        final pendingPkg = _pendingPackageByPaymentCode.remove(paymentCode);
+        if (pendingPkg != null) {
+          _paidCreditByUserId[tx.userId] = (
+            packagePlan: pendingPkg,
+            paymentCode: completedTx.paymentCode,
+            amount: completedTx.amount,
+            paidAt: DateTime.now(),
+          );
+          socketService.emitSimulatedPaymentSuccess({
+            'paymentCode': completedTx.paymentCode,
+            'type': completedTx.type,
+            'amount': completedTx.amount,
+            'status': 'SUCCESS',
+          });
+          return Result.success(
+            PaymentTransactionEntity(
+              id: completedTx.id,
+              userId: completedTx.userId,
+              type: completedTx.type,
+              amount: completedTx.amount,
+              paymentCode: completedTx.paymentCode,
+              transferContent: completedTx.transferContent,
+              qrImageUrl: completedTx.qrImageUrl,
+              status: completedTx.status,
+              referenceId: completedTx.referenceId,
+              packagePlan: pendingPkg.apiValue,
+              readyForShopForm: true,
+            ),
+          );
+        }
+      }
+    } else if (tx.type == 'RENEW_SHOP') {
+      final renew = _pendingRenewByPaymentCode.remove(paymentCode);
+      if (renew != null) {
+        final sIdx = db.shops.indexWhere((s) => s.id == renew.shopId);
+        if (sIdx != -1) {
+          final currentShop = db.shops[sIdx];
+          final now = DateTime.now();
+          final baseExp = currentShop.subscriptionExpiresAt != null &&
+                  currentShop.subscriptionExpiresAt!.isAfter(now)
+              ? currentShop.subscriptionExpiresAt!
+              : now;
+          final nextExp = baseExp.add(
+            Duration(days: renew.packagePlan.durationDays),
+          );
+          final isCoop = renew.packagePlan.isCooperation;
+          db.shops[sIdx] = currentShop.copyWith(
+            subscriptionPlan: renew.packagePlan,
+            isCooperation: isCoop,
+            subscriptionExpiresAt: nextExp,
+            highlightExpiresAt: isCoop ? nextExp : null,
+            serverIsHighlighted: isCoop,
+          );
+          _syncActiveDiscountsToOfflineShops();
+          db.notifications.insert(
+            0,
+            AppNotificationEntity(
+              id: 'notif_renew_${DateTime.now().millisecondsSinceEpoch}',
+              userId: currentShop.ownerId,
+              title: 'Gia hạn gói quán thành công',
+              body:
+                  'Quán "${currentShop.name}" đã được gia hạn ${renew.packagePlan.label}.',
+              type: NotificationType.paymentConfirmed,
+              targetShopId: currentShop.id,
+              createdAt: DateTime.now(),
+            ),
+          );
+        }
       }
     } else if (tx.type == 'BUY_HIGHLIGHT') {
       final pkg = db.pendingHighlightByPaymentCode.remove(paymentCode);
@@ -658,6 +793,334 @@ class ShopRepositoryImpl implements ShopRepository {
       await remote.deleteShopService(serviceId);
     } catch (_) {}
     db.services.removeWhere((s) => s.id == serviceId && s.shopId == shopId);
+    return Result.success(null);
+  }
+
+  @override
+  Future<Result<RegisterShopCredit>> getRegisterShopCredit() async {
+    try {
+      final map = await remote.getRegisterShopCredit();
+      final hasCredit = map['hasCredit'] == true;
+      final plan = ShopPackagePlan.fromApi(map['packagePlan']?.toString());
+      final paidAtStr = map['paidAt']?.toString();
+      return Result.success(
+        RegisterShopCredit(
+          hasCredit: hasCredit,
+          packagePlan: plan,
+          amount: (map['amount'] as num?)?.toInt() ?? 0,
+          paymentCode: (map['paymentCode'] ?? '').toString(),
+          paidAt: paidAtStr != null ? DateTime.tryParse(paidAtStr) : null,
+        ),
+      );
+    } on DioException catch (e) {
+      if (e.response != null) {
+        return Result.failure(
+          ValidationFailure(
+            _extractDioError(e, 'Không thể kiểm tra trạng thái thanh toán'),
+          ),
+        );
+      }
+    } catch (_) {}
+
+    final userId = db.currentUser?.id;
+    final offlineCredit =
+        userId != null ? _paidCreditByUserId[userId] : null;
+    if (offlineCredit == null) {
+      return Result.success(const RegisterShopCredit(hasCredit: false));
+    }
+    return Result.success(
+      RegisterShopCredit(
+        hasCredit: true,
+        packagePlan: offlineCredit.packagePlan,
+        amount: offlineCredit.amount,
+        paymentCode: offlineCredit.paymentCode,
+        paidAt: offlineCredit.paidAt,
+      ),
+    );
+  }
+
+  @override
+  Future<Result<PaymentTransactionEntity>> createPackageRegistrationPayment({
+    required String userId,
+    required ShopPackagePlan packagePlan,
+  }) async {
+    try {
+      final tx = await remote.createRegisterShopQr({
+        'packagePlan': packagePlan.apiValue,
+      });
+      db.transactions.removeWhere((t) => t.paymentCode == tx.paymentCode);
+      db.transactions.add(tx);
+      return Result.success(tx);
+    } on DioException catch (e) {
+      if (e.response != null) {
+        return Result.failure(
+          ValidationFailure(
+            _extractDioError(e, 'Không thể tạo mã QR thanh toán gói'),
+          ),
+        );
+      }
+    } catch (_) {}
+
+    final codeDigits =
+        (DateTime.now().millisecondsSinceEpoch % 900000 + 100000).toString();
+    final paymentCode = 'PAYREG$codeDigits';
+    final transferContent = 'PAY REG $codeDigits';
+    final amount = packagePlan.price;
+
+    final tx = PaymentTransactionEntity(
+      id: 'tx_$codeDigits',
+      userId: userId,
+      type: 'REGISTER_SHOP',
+      amount: amount,
+      paymentCode: paymentCode,
+      transferContent: transferContent,
+      qrImageUrl: db.buildVietQrUrl(
+        amount: amount,
+        transferContent: transferContent,
+      ),
+      status: 'PENDING',
+      packagePlan: packagePlan.apiValue,
+    );
+    db.transactions.add(tx);
+    _pendingPackageByPaymentCode[paymentCode] = packagePlan;
+    return Result.success(tx);
+  }
+
+  @override
+  Future<Result<ShopEntity>> submitShopRegistrationAfterPayment({
+    required String userId,
+    required String paymentCode,
+    required String name,
+    required String address,
+    required String phone,
+    required String description,
+    required String openTime,
+    required String closeTime,
+    required double latitude,
+    required double longitude,
+    String? coverImageUrl,
+  }) async {
+    final cleanName = name.trim();
+    final cleanAddr = address.trim();
+    final resolvedCover =
+        coverImageUrl != null && coverImageUrl.trim().isNotEmpty
+            ? coverImageUrl.trim()
+            : 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=900&q=80';
+
+    try {
+      final created = await remote.submitRegisterShopForm({
+        if (paymentCode.trim().isNotEmpty) 'paymentCode': paymentCode.trim(),
+        'name': cleanName,
+        'address': cleanAddr,
+        'phone': phone.trim(),
+        'description': description.trim().isEmpty
+            ? 'Không gian cắt tóc chuyên nghiệp dành cho phái mạnh.'
+            : description.trim(),
+        'openTime': openTime,
+        'closeTime': closeTime,
+        'latitude': latitude,
+        'longitude': longitude,
+        'coverUrl': resolvedCover,
+      });
+      _syncShopToLocal(created);
+      return Result.success(created);
+    } on DioException catch (e) {
+      if (e.response != null) {
+        return Result.failure(
+          ValidationFailure(
+            _extractDioError(e, 'Không thể gửi hồ sơ đăng ký quán'),
+          ),
+        );
+      }
+    } catch (_) {}
+
+    final credit = _paidCreditByUserId.remove(userId);
+    if (credit == null) {
+      return Result.failure(
+        const ValidationFailure('Vui lòng thanh toán gói trước khi đăng ký quán'),
+      );
+    }
+    final dupName = db.shops.any(
+      (s) => s.name.trim().toLowerCase() == cleanName.toLowerCase(),
+    );
+    if (dupName) {
+      return Result.failure(
+        const ValidationFailure('Tên quán đã tồn tại trên hệ thống'),
+      );
+    }
+
+    final newShopId = 'shop_${DateTime.now().millisecondsSinceEpoch}';
+    final newShop = ShopEntity(
+      id: newShopId,
+      ownerId: userId,
+      name: cleanName,
+      address: cleanAddr,
+      phone: phone.trim(),
+      description: description.trim().isEmpty
+          ? 'Không gian cắt tóc chuyên nghiệp dành cho phái mạnh.'
+          : description.trim(),
+      openTime: openTime,
+      closeTime: closeTime,
+      latitude: latitude,
+      longitude: longitude,
+      coverImageUrl: resolvedCover,
+      galleryUrls: const [],
+      rating: 0.0,
+      reviewCount: 0,
+      isActive: false,
+      subscriptionPlan: credit.packagePlan,
+      isCooperation: credit.packagePlan.isCooperation,
+      paymentCode: credit.paymentCode,
+      paymentAmount: credit.amount,
+      paidAt: credit.paidAt,
+    );
+    db.shops.add(newShop);
+
+    for (final admin
+        in db.users.where((u) => u.role == UserRole.admin).toList()) {
+      db.notifications.insert(
+        0,
+        AppNotificationEntity(
+          id: 'notif_admin_${DateTime.now().microsecondsSinceEpoch}',
+          userId: admin.id,
+          title: 'Yêu cầu mở quán mới: $cleanName',
+          body: 'Gói ${credit.packagePlan.label} đã thanh toán. Bấm để duyệt.',
+          type: NotificationType.shopApproval,
+          targetShopId: newShopId,
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+    db.notifications.insert(
+      0,
+      AppNotificationEntity(
+        id: 'notif_owner_${DateTime.now().microsecondsSinceEpoch}',
+        userId: userId,
+        title: 'Đã gửi hồ sơ đăng ký quán (Chờ duyệt)',
+        body: 'Quán "$cleanName" đang chờ Admin hệ thống phê duyệt.',
+        type: NotificationType.shopApproval,
+        targetShopId: newShopId,
+        createdAt: DateTime.now(),
+      ),
+    );
+    return Result.success(newShop);
+  }
+
+  @override
+  Future<Result<PaymentTransactionEntity>> createRenewShopPayment({
+    required String userId,
+    required String shopId,
+    required ShopPackagePlan packagePlan,
+  }) async {
+    try {
+      final tx = await remote.createRenewShopQr(packagePlan.apiValue);
+      db.transactions.removeWhere((t) => t.paymentCode == tx.paymentCode);
+      db.transactions.add(tx);
+      return Result.success(tx);
+    } on DioException catch (e) {
+      if (e.response != null) {
+        return Result.failure(
+          ValidationFailure(
+            _extractDioError(e, 'Không thể tạo mã QR gia hạn gói'),
+          ),
+        );
+      }
+    } catch (_) {}
+
+    final codeDigits =
+        (DateTime.now().millisecondsSinceEpoch % 900000 + 100000).toString();
+    final paymentCode = 'PAYRENEW$codeDigits';
+    final transferContent = 'PAY RENEW $codeDigits';
+    final amount = packagePlan.price;
+    final tx = PaymentTransactionEntity(
+      id: 'tx_$codeDigits',
+      userId: userId,
+      type: 'RENEW_SHOP',
+      amount: amount,
+      paymentCode: paymentCode,
+      transferContent: transferContent,
+      qrImageUrl: db.buildVietQrUrl(
+        amount: amount,
+        transferContent: transferContent,
+      ),
+      status: 'PENDING',
+      referenceId: shopId,
+      packagePlan: packagePlan.apiValue,
+    );
+    db.transactions.add(tx);
+    _pendingRenewByPaymentCode[paymentCode] = (
+      shopId: shopId,
+      packagePlan: packagePlan,
+    );
+    return Result.success(tx);
+  }
+
+  @override
+  Future<Result<List<DiscountCodeEntity>>> getDiscountCodes() async {
+    try {
+      final remoteList = await remote.getDiscountCodes();
+      _offlineDiscountCodes
+        ..clear()
+        ..addAll(remoteList);
+      _syncActiveDiscountsToOfflineShops();
+      return Result.success(remoteList);
+    } catch (_) {}
+    _syncActiveDiscountsToOfflineShops();
+    return Result.success(List.unmodifiable(_offlineDiscountCodes));
+  }
+
+  @override
+  Future<Result<DiscountCodeEntity>> createDiscountCode({
+    required String name,
+    String? code,
+    required int discountPercent,
+    required DateTime startAt,
+    required DateTime endAt,
+  }) async {
+    try {
+      final created = await remote.createDiscountCode(
+        name: name,
+        code: code,
+        discountPercent: discountPercent,
+        startAt: startAt,
+        endAt: endAt,
+      );
+      _offlineDiscountCodes.insert(0, created);
+      _syncActiveDiscountsToOfflineShops();
+      return Result.success(created);
+    } on DioException catch (e) {
+      if (e.response != null) {
+        return Result.failure(
+          ValidationFailure(
+            _extractDioError(e, 'Không thể thêm mã giảm giá'),
+          ),
+        );
+      }
+    } catch (_) {}
+
+    final created = DiscountCodeEntity(
+      id: 'disc_${DateTime.now().millisecondsSinceEpoch}',
+      name: name.trim(),
+      code: (code == null || code.trim().isEmpty)
+          ? ''
+          : code.trim().toUpperCase(),
+      discountPercent: discountPercent,
+      startAt: startAt,
+      endAt: endAt,
+      isActive: true,
+    );
+    _offlineDiscountCodes.insert(0, created);
+    _syncActiveDiscountsToOfflineShops();
+    return Result.success(created);
+  }
+
+  @override
+  Future<Result<void>> deleteDiscountCode(String id) async {
+    try {
+      await remote.deleteDiscountCode(id);
+    } catch (_) {}
+    _offlineDiscountCodes.removeWhere((d) => d.id == id);
+    _syncActiveDiscountsToOfflineShops();
     return Result.success(null);
   }
 

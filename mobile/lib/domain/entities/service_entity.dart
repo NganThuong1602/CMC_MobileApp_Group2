@@ -5,6 +5,7 @@ class ServiceEntity extends Equatable {
   final String shopId;
   final String name;
   final int price;
+  final int? discountedPrice;
   final int durationMinutes;
   final String? imageUrl;
 
@@ -13,11 +14,13 @@ class ServiceEntity extends Equatable {
     required this.shopId,
     required this.name,
     required this.price,
+    this.discountedPrice,
     required this.durationMinutes,
     this.imageUrl,
   });
 
   @override
-  List<Object?> get props => [id, shopId, name, price, durationMinutes, imageUrl];
+  List<Object?> get props =>
+      [id, shopId, name, price, discountedPrice, durationMinutes, imageUrl];
 }
 
