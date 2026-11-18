@@ -22,6 +22,7 @@ import '../../presentation/blocs/shop_discovery/shop_discovery_cubit.dart';
 import '../network/api_client.dart';
 import '../network/socket_service.dart';
 import '../services/booking_slot_calculator.dart';
+import '../services/fcm_service.dart';
 import '../services/location_service.dart';
 
 final sl = GetIt.instance;
@@ -32,6 +33,7 @@ Future<void> initDependencies() async {
   // Core Network & Services
   sl.registerLazySingleton<ApiClient>(() => ApiClient());
   sl.registerLazySingleton<SocketService>(() => SocketService());
+  sl.registerLazySingleton<FcmService>(() => FcmService());
   sl.registerLazySingleton<LocationService>(() => const LocationService());
   sl.registerLazySingleton<BookingSlotCalculator>(
     () => const BookingSlotCalculator(),
@@ -49,6 +51,7 @@ Future<void> initDependencies() async {
       db: sl<InMemoryDatabase>(),
       remote: sl<RemoteApiDataSource>(),
       socketService: sl<SocketService>(),
+      fcmService: sl<FcmService>(),
     ),
   );
   sl.registerLazySingleton<ShopRepository>(

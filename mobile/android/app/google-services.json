@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "754540768306",
+    "project_id": "barbersmart-e49cf",
+    "storage_bucket": "barbersmart-e49cf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:754540768306:android:284944cc75349ff1d1602b",
+        "android_client_info": {
+          "package_name": "com.example.barber_booking_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD8-JOIWXQuFZvC3doEaYuejV87qZN2MpM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

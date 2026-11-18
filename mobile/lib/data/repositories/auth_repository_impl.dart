@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/enums/app_enums.dart';
 import '../../core/error/failures.dart';
 import '../../core/network/socket_service.dart';
+import '../../core/services/fcm_service.dart';
 import '../../core/services/session_storage_service.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/utils/result.dart';
@@ -17,12 +19,14 @@ class AuthRepositoryImpl implements AuthRepository {
   final InMemoryDatabase db;
   final RemoteApiDataSource remote;
   final SocketService socketService;
+  final FcmService? fcmService;
   final SessionStorageService sessionStorage;
 
   AuthRepositoryImpl({
     required this.db,
     required this.remote,
     required this.socketService,
+    this.fcmService,
     this.sessionStorage = const SessionStorageService(),
   }) {
     _restorePersistedSessionSync();
@@ -68,6 +72,9 @@ class AuthRepositoryImpl implements AuthRepository {
       token: token ?? remote.apiClient.accessToken,
       userJson: jsonEncode(UserModel.toJson(user)),
     );
+    if ((token ?? remote.apiClient.accessToken ?? '').isNotEmpty) {
+      unawaited(fcmService?.syncCurrentToken() ?? Future.value());
+    }
   }
 
   String _extractDioError(DioException e, String fallback) {
@@ -407,6 +414,7 @@ class AuthRepositoryImpl implements AuthRepository {
     db.currentUser = null;
     sessionStorage.clearSession();
     socketService.disconnect();
+    unawaited(fcmService?.clearTokenOnLogout() ?? Future.value());
     return Result.success(null);
   }
 }

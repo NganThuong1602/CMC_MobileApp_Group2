@@ -716,6 +716,16 @@ class RemoteApiDataSource {
     await apiClient.dio.patch('/notifications/$notificationId/read');
   }
 
+  Future<void> registerFcmToken(
+    String token, {
+    String platform = 'android',
+  }) async {
+    await apiClient.dio.post(
+      '/notifications/fcm-token',
+      data: {'token': token, 'platform': platform},
+    );
+  }
+
   // ==================== FORUM & DISCOUNTS ====================
   Future<List<PostModel>> getForumPosts() async {
     final res = await apiClient.dio.get('/posts/forum');
