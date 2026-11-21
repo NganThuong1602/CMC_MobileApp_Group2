@@ -10,6 +10,7 @@ import '../../../domain/repositories/social_repository.dart';
 
 class ShopDiscoveryState extends Equatable {
   final bool onlyHighlightedFilter;
+  final List<ShopEntity> allNearbyShops;
   final List<ShopEntity> nearbyShops;
   final List<ShopEntity> highlightedShops;
   final String searchQuery;
@@ -28,6 +29,7 @@ class ShopDiscoveryState extends Equatable {
 
   const ShopDiscoveryState({
     this.onlyHighlightedFilter = false,
+    this.allNearbyShops = const [],
     this.nearbyShops = const [],
     this.highlightedShops = const [],
     this.searchQuery = '',
@@ -55,6 +57,7 @@ class ShopDiscoveryState extends Equatable {
 
   ShopDiscoveryState copyWith({
     bool? onlyHighlightedFilter,
+    List<ShopEntity>? allNearbyShops,
     List<ShopEntity>? nearbyShops,
     List<ShopEntity>? highlightedShops,
     String? searchQuery,
@@ -76,6 +79,7 @@ class ShopDiscoveryState extends Equatable {
     return ShopDiscoveryState(
       onlyHighlightedFilter:
           onlyHighlightedFilter ?? this.onlyHighlightedFilter,
+      allNearbyShops: allNearbyShops ?? this.allNearbyShops,
       nearbyShops: nearbyShops ?? this.nearbyShops,
       highlightedShops: highlightedShops ?? this.highlightedShops,
       searchQuery: searchQuery ?? this.searchQuery,
@@ -104,6 +108,7 @@ class ShopDiscoveryState extends Equatable {
   @override
   List<Object?> get props => [
         onlyHighlightedFilter,
+        allNearbyShops,
         nearbyShops,
         highlightedShops,
         searchQuery,
@@ -261,44 +266,34 @@ class ShopDiscoveryCubit extends Cubit<ShopDiscoveryState> {
     return super.close();
   }
 
-  Future<void> loadAll({String? userId}) async {
-    emit(state.copyWith(isLoading: true));
-    final nearbyRes = await shopRepository.getNearbyShops(
-      userLat: state.userLat,
-      userLng: state.userLng,
-      searchQuery: state.searchQuery,
-      minRating: state.minRatingFilter,
-      onlyHighlighted: state.onlyHighlightedFilter,
-    );
-    final highlightRes = await shopRepository.getHighlightedShops();
-
-    int unread = state.unreadNotificationCount;
-    if (userId != null) {
-      final notifRes = await socialRepository.getUserNotifications(userId);
-      if (notifRes.isSuccess) {
-        unread = notifRes.data!.where((n) => !n.isRead).length;
-      }
-    }
-
-    // Tính lại khoảng cách (km) chuẩn xác từ tọa độ GPS thực tế của thiết bị tới từng quán
-    // Ưu tiên quán Nổi bật (Hợp tác) lên đầu Trang chủ và áp dụng bộ lọc.
-    final rawNearby = nearbyRes.data ?? state.nearbyShops;
-    final minRating = state.minRatingFilter;
-    final maxDistance = state.maxDistanceKmFilter;
+  List<ShopEntity> _filterAndSortShops(
+    List<ShopEntity> source, {
+    required double lat,
+    required double lng,
+    required bool onlyHighlighted,
+    required double? minRating,
+    required double? maxDistance,
+    required String searchQuery,
+  }) {
     final now = DateTime.now();
-
-    final computedNearby = rawNearby
+    final q = searchQuery.trim().toLowerCase();
+    return source
         .map((shop) {
           final km = locationService.distanceKm(
-            userLat: state.userLat,
-            userLng: state.userLng,
+            userLat: lat,
+            userLng: lng,
             shopLat: shop.latitude,
             shopLng: shop.longitude,
           );
           return shop.copyWith(distanceKm: km);
         })
         .where((shop) {
-          if (state.onlyHighlightedFilter && !shop.isHighlightedAt(now)) {
+          if (q.isNotEmpty &&
+              !shop.name.toLowerCase().contains(q) &&
+              !shop.address.toLowerCase().contains(q)) {
+            return false;
+          }
+          if (onlyHighlighted && !shop.isHighlightedAt(now)) {
             return false;
           }
           if (minRating != null &&
@@ -318,6 +313,39 @@ class ShopDiscoveryCubit extends Cubit<ShopDiscoveryState> {
         if (ha != hb) return hb.compareTo(ha);
         return a.distanceKm.compareTo(b.distanceKm);
       });
+  }
+
+  Future<void> loadAll({String? userId}) async {
+    if (state.allNearbyShops.isEmpty) {
+      emit(state.copyWith(isLoading: true));
+    }
+    final nearbyRes = await shopRepository.getNearbyShops(
+      userLat: state.userLat,
+      userLng: state.userLng,
+      searchQuery: '',
+      minRating: null,
+      onlyHighlighted: false,
+    );
+    final highlightRes = await shopRepository.getHighlightedShops();
+
+    int unread = state.unreadNotificationCount;
+    if (userId != null) {
+      final notifRes = await socialRepository.getUserNotifications(userId);
+      if (notifRes.isSuccess) {
+        unread = notifRes.data!.where((n) => !n.isRead).length;
+      }
+    }
+
+    final rawAll = nearbyRes.data ?? state.allNearbyShops;
+    final computedNearby = _filterAndSortShops(
+      rawAll,
+      lat: state.userLat,
+      lng: state.userLng,
+      onlyHighlighted: state.onlyHighlightedFilter,
+      minRating: state.minRatingFilter,
+      maxDistance: state.maxDistanceKmFilter,
+      searchQuery: state.searchQuery,
+    );
 
     final rawHighlights = highlightRes.data ?? state.highlightedShops;
     final computedHighlights = rawHighlights.map((shop) {
@@ -332,6 +360,7 @@ class ShopDiscoveryCubit extends Cubit<ShopDiscoveryState> {
 
     emit(
       state.copyWith(
+        allNearbyShops: rawAll,
         nearbyShops: computedNearby,
         highlightedShops: computedHighlights,
         unreadNotificationCount: unread,
@@ -375,27 +404,62 @@ class ShopDiscoveryCubit extends Cubit<ShopDiscoveryState> {
   }
 
   Future<void> updateSearch(String query) async {
-    emit(state.copyWith(searchQuery: query));
-    await loadAll();
+    final instant = _filterAndSortShops(
+      state.allNearbyShops,
+      lat: state.userLat,
+      lng: state.userLng,
+      onlyHighlighted: state.onlyHighlightedFilter,
+      minRating: state.minRatingFilter,
+      maxDistance: state.maxDistanceKmFilter,
+      searchQuery: query,
+    );
+    emit(
+      state.copyWith(
+        searchQuery: query,
+        nearbyShops: instant,
+      ),
+    );
   }
 
   Future<void> setMinRatingFilter(double? rating) async {
+    final instant = _filterAndSortShops(
+      state.allNearbyShops,
+      lat: state.userLat,
+      lng: state.userLng,
+      onlyHighlighted: state.onlyHighlightedFilter,
+      minRating: rating,
+      maxDistance: state.maxDistanceKmFilter,
+      searchQuery: state.searchQuery,
+    );
     emit(
       state.copyWith(
         minRatingFilter: rating,
         clearRatingFilter: rating == null,
+        nearbyShops: instant,
       ),
     );
-    await loadAll();
   }
 
   Future<void> toggleHighlightedFilter({String? userId}) async {
+    final nextHighlighted = !state.onlyHighlightedFilter;
+    final instant = _filterAndSortShops(
+      state.allNearbyShops,
+      lat: state.userLat,
+      lng: state.userLng,
+      onlyHighlighted: nextHighlighted,
+      minRating: state.minRatingFilter,
+      maxDistance: state.maxDistanceKmFilter,
+      searchQuery: state.searchQuery,
+    );
     emit(
       state.copyWith(
-        onlyHighlightedFilter: !state.onlyHighlightedFilter,
+        onlyHighlightedFilter: nextHighlighted,
+        nearbyShops: instant,
       ),
     );
-    await loadAll(userId: userId);
+    if (state.allNearbyShops.isEmpty) {
+      await loadAll(userId: userId);
+    }
   }
 
   /// Áp dụng đồng thời bộ lọc Nổi bật, Đánh giá sao & Khoảng cách (0 -> maxDistanceKm) khi bấm "Tìm kiếm".
@@ -405,32 +469,63 @@ class ShopDiscoveryCubit extends Cubit<ShopDiscoveryState> {
     bool? onlyHighlighted,
     String? userId,
   }) async {
+    final nextHighlighted = onlyHighlighted ?? state.onlyHighlightedFilter;
+    final instant = _filterAndSortShops(
+      state.allNearbyShops,
+      lat: state.userLat,
+      lng: state.userLng,
+      onlyHighlighted: nextHighlighted,
+      minRating: minRating,
+      maxDistance: maxDistanceKm,
+      searchQuery: state.searchQuery,
+    );
     emit(
       state.copyWith(
-        onlyHighlightedFilter: onlyHighlighted ?? state.onlyHighlightedFilter,
+        onlyHighlightedFilter: nextHighlighted,
         minRatingFilter: minRating,
         clearRatingFilter: minRating == null,
         maxDistanceKmFilter: maxDistanceKm,
         clearDistanceFilter: maxDistanceKm == null,
+        nearbyShops: instant,
       ),
     );
-    await loadAll(userId: userId);
+    if (state.allNearbyShops.isEmpty) {
+      await loadAll(userId: userId);
+    }
   }
 
   /// Xoá lựa chọn lọc (Đánh giá & Khoảng cách) khi bấm nút "Xoá lọc".
   /// Giữ nguyên tab "Tất cả" / "Nổi bật" mà người dùng đang chọn ở Trang chủ.
   Future<void> clearFilters({String? userId}) async {
+    final instant = _filterAndSortShops(
+      state.allNearbyShops,
+      lat: state.userLat,
+      lng: state.userLng,
+      onlyHighlighted: state.onlyHighlightedFilter,
+      minRating: null,
+      maxDistance: null,
+      searchQuery: state.searchQuery,
+    );
     emit(
       state.copyWith(
         clearRatingFilter: true,
         clearDistanceFilter: true,
+        nearbyShops: instant,
       ),
     );
-    await loadAll(userId: userId);
   }
 
   /// Tự động xoá toàn bộ từ khoá tìm kiếm & bộ lọc khi chuyển qua lại giữa Trang chủ và Bản đồ.
   Future<void> resetAllSearchAndFiltersOnTabSwitch({String? userId}) async {
+    final instant = _filterAndSortShops(
+      state.allNearbyShops,
+      lat: state.userLat,
+      lng: state.userLng,
+      onlyHighlighted: false,
+      minRating: null,
+      maxDistance: null,
+      searchQuery: '',
+    );
     emit(
       state.copyWith(
         searchQuery: '',
@@ -438,8 +533,9 @@ class ShopDiscoveryCubit extends Cubit<ShopDiscoveryState> {
         clearRatingFilter: true,
         clearDistanceFilter: true,
         filterResetRevision: state.filterResetRevision + 1,
+        nearbyShops: instant,
       ),
     );
-    await loadAll(userId: userId);
+    unawaited(loadAll(userId: userId));
   }
 }

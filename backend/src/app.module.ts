@@ -15,6 +15,7 @@ import {
   ReviewEntity,
   ServiceEntity,
   ShopEntity,
+  ShopReportEntity,
   TransactionEntity,
   UserEntity,
 } from './database/entities';
@@ -59,6 +60,7 @@ import { UploadModule } from './modules/upload/upload.module';
           ChatMessageEntity,
           NotificationEntity,
           DiscountCodeEntity,
+          ShopReportEntity,
         ],
         synchronize: config.get<string>('DB_SYNCHRONIZE', 'true') === 'true',
         ssl:

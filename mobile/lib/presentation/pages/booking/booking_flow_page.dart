@@ -8,7 +8,6 @@ import '../../../core/utils/formatters.dart';
 import '../../../domain/entities/time_slot_entity.dart';
 import '../../blocs/auth/auth_cubit.dart';
 import '../../blocs/booking/booking_bloc.dart';
-import '../../widgets/sepay_qr_dialog.dart';
 
 /// Luồng Đặt lịch Core Logic Complex:
 /// 1. Chọn Barber -> Chọn nhiều Dịch vụ -> Tự cộng dồn Tổng thời gian & Tổng giá.
@@ -17,7 +16,7 @@ import '../../widgets/sepay_qr_dialog.dart';
 ///    - Ca chiều (14:00 - closeTime)
 /// 3. Chặn tràn giờ (Disable ngay nếu `start + totalDuration` lấn qua 11:30 hoặc closeTime)
 ///    & chuyển xám các mốc giờ đã có khách đặt.
-/// 4. Hỗ trợ Thanh toán tại quán hoặc QR Code động (SePay Webhook tự động chuyển COMPLETED).
+/// 4. Thanh toán trực tiếp tại quán sau khi cắt xong.
 class BookingFlowPage extends StatelessWidget {
   final String shopId;
   final String? preselectedBarberId;
@@ -52,7 +51,6 @@ class _BookingFlowView extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = context.colorScheme;
     final tt = context.appTextStyles;
-    final appColors = context.appColors;
     final user = context.watch<AuthCubit>().state.user;
 
     return BlocConsumer<BookingBloc, BookingState>(
@@ -67,36 +65,15 @@ class _BookingFlowView extends StatelessWidget {
         }
 
         if (state.createdBundle != null) {
-          final bundle = state.createdBundle!;
-          if (bundle.paymentQr != null) {
-            final paid = await SepayQrDialog.show(
-              context,
-              title: 'Quét QR SePay thanh toán lịch cắt',
-              transaction: bundle.paymentQr!,
-            );
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                backgroundColor: paid ? cs.primary : appColors.warning,
-                content: Text(
-                  paid
-                      ? 'SePay đã xác nhận! Lịch cắt đã tự động chuyển sang Hoàn thành.'
-                      : 'Lịch đã ghi nhận ở trạng thái chờ thanh toán QR.',
-                ),
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: cs.primary,
+              content: const Text(
+                'Đặt lịch thành công! Hẹn gặp bạn tại quán.',
               ),
-            );
-            context.go('/my-bookings');
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                backgroundColor: cs.primary,
-                content: const Text(
-                  'Đặt lịch thành công! Hẹn gặp bạn tại quán.',
-                ),
-              ),
-            );
-            context.go('/my-bookings');
-          }
+            ),
+          );
+          context.go('/my-bookings');
         }
       },
       builder: (context, state) {
@@ -207,11 +184,7 @@ class _BookingFlowView extends StatelessWidget {
                                 .read<BookingBloc>()
                                 .add(BookingSubmitted(user.id));
                           },
-                    child: Text(
-                      state.paymentMethod == PaymentMethod.qrCode
-                          ? 'Tạo QR & Đặt lịch'
-                          : 'Xác nhận đặt lịch',
-                    ),
+                    child: const Text('Xác nhận đặt lịch'),
                   ),
                 ],
               ),
@@ -628,44 +601,27 @@ class _BookingFlowView extends StatelessWidget {
     final cs = context.colorScheme;
     final tt = context.appTextStyles;
 
-    return Column(
-      children: PaymentMethod.values.map((m) {
-        final selected = state.paymentMethod == m;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Material(
-            color: cs.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(
-                color: selected ? cs.primary : cs.outline,
-              ),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: ListTile(
-              onTap: () => context
-                  .read<BookingBloc>()
-                  .add(BookingPaymentMethodChanged(m)),
-              leading: Icon(
-                selected
-                    ? Icons.radio_button_checked_rounded
-                    : Icons.radio_button_off_rounded,
-                color: selected ? cs.primary : cs.onSurfaceVariant,
-              ),
-              title: Text(
-                m.label,
-                style: tt.bodyStrong,
-              ),
-              subtitle: Text(
-                m == PaymentMethod.qrCode
-                    ? 'Tạo mã VietQR động, SePay tự động xác nhận Hoàn thành qua Socket.IO'
-                    : 'Thanh toán trực tiếp cho Barber sau khi cắt xong',
-                style: tt.bodySmallMuted,
-              ),
-            ),
-          ),
-        );
-      }).toList(),
+    return Material(
+      color: cs.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: cs.primary),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        leading: Icon(
+          Icons.radio_button_checked_rounded,
+          color: cs.primary,
+        ),
+        title: Text(
+          PaymentMethod.atShop.label,
+          style: tt.bodyStrong,
+        ),
+        subtitle: Text(
+          'Thanh toán trực tiếp tại quán sau khi cắt xong',
+          style: tt.bodySmallMuted,
+        ),
+      ),
     );
   }
 }

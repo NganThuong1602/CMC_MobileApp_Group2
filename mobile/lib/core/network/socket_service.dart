@@ -12,10 +12,12 @@ class SocketService {
   final _paymentSuccessCtrl =
       StreamController<Map<String, dynamic>>.broadcast();
   final _newMessageCtrl = StreamController<Map<String, dynamic>>.broadcast();
+  final _roleUpdatedCtrl = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<Map<String, dynamic>> get onPaymentSuccess =>
       _paymentSuccessCtrl.stream;
   Stream<Map<String, dynamic>> get onNewChatMessage => _newMessageCtrl.stream;
+  Stream<Map<String, dynamic>> get onRoleUpdated => _roleUpdatedCtrl.stream;
 
   void connect(String userId) {
     disconnect();
@@ -38,6 +40,12 @@ class SocketService {
     socket.on('chat.new_message', (data) {
       if (data is Map) {
         _newMessageCtrl.add(Map<String, dynamic>.from(data));
+      }
+    });
+
+    socket.on('user.role_updated', (data) {
+      if (data is Map) {
+        _roleUpdatedCtrl.add(Map<String, dynamic>.from(data));
       }
     });
 

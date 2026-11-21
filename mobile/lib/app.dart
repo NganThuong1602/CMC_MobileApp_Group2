@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'core/constants/app_constants.dart';
 import 'core/di/injection_container.dart';
+import 'core/network/socket_service.dart';
 import 'core/services/fcm_service.dart';
 import 'core/theme/app_theme.dart';
 import 'presentation/blocs/auth/auth_cubit.dart';
@@ -26,6 +27,7 @@ class _BarberSmartAppState extends State<BarberSmartApp> {
   final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   StreamSubscription<RemoteMessage>? _fcmForegroundSub;
   StreamSubscription<RemoteMessage>? _fcmTapSub;
+  StreamSubscription<Map<String, dynamic>>? _roleUpdatedSub;
 
   @override
   void initState() {
@@ -34,6 +36,19 @@ class _BarberSmartAppState extends State<BarberSmartApp> {
     _shopDiscoveryCubit = sl<ShopDiscoveryCubit>();
     _router = AppRouter.createRouter(_authCubit);
     _bindFcmListeners();
+    _bindRoleUpgradeListener();
+  }
+
+  void _bindRoleUpgradeListener() {
+    if (!sl.isRegistered<SocketService>()) return;
+    _roleUpdatedSub = sl<SocketService>().onRoleUpdated.listen((payload) async {
+      await _authCubit.refreshCurrentUser();
+      final newRole = (payload['newRole'] ?? '').toString().toUpperCase();
+      if (newRole == 'MANAGER') {
+        final ts = DateTime.now().millisecondsSinceEpoch;
+        _router.go('/?tab=2&openServices=1&ts=$ts');
+      }
+    });
   }
 
   void _bindFcmListeners() {
@@ -102,6 +117,7 @@ class _BarberSmartAppState extends State<BarberSmartApp> {
   void dispose() {
     _fcmForegroundSub?.cancel();
     _fcmTapSub?.cancel();
+    _roleUpdatedSub?.cancel();
     super.dispose();
   }
 

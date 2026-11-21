@@ -26,6 +26,7 @@ class RegisterShopPage extends StatefulWidget {
 }
 
 class _RegisterShopPageState extends State<RegisterShopPage> {
+  final _applicantNameCtrl = TextEditingController();
   final _nameCtrl = TextEditingController();
   final _addrCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
@@ -33,6 +34,11 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
   final _closeCtrl = TextEditingController(text: '20:30');
   final _descCtrl = TextEditingController();
   String _coverUrl = '';
+  String _storefrontUrl = '';
+  String _priceListUrl = '';
+  String _cccdFrontUrl = '';
+  String _cccdBackUrl = '';
+  String _businessLicenseUrl = '';
   bool _submitting = false;
   bool _loadingExisting = true;
   ShopEntity? _submittedShop;
@@ -53,17 +59,29 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
   double _userLat = AppConstants.defaultLat;
   double _userLng = AppConstants.defaultLng;
 
+  String? _applicantNameError;
   String? _nameError;
   String? _addrError;
   String? _phoneError;
   String? _openError;
   String? _closeError;
   String? _coverError;
+  String? _storefrontError;
+  String? _priceListError;
+  String? _cccdFrontError;
+  String? _cccdBackError;
+  String? _businessLicenseError;
   bool _hasUserGps = false;
 
   @override
   void initState() {
     super.initState();
+    try {
+      final currentUser = context.read<AuthCubit>().state.user;
+      if (currentUser != null && currentUser.fullName.trim().isNotEmpty) {
+        _applicantNameCtrl.text = currentUser.fullName.trim();
+      }
+    } catch (_) {}
     try {
       final discovery = sl<ShopDiscoveryCubit>().state;
       _userLat = discovery.userLat;
@@ -126,6 +144,7 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
   @override
   void dispose() {
     _addressDebounce?.cancel();
+    _applicantNameCtrl.dispose();
     _nameCtrl.dispose();
     _addrCtrl.dispose();
     _phoneCtrl.dispose();
@@ -217,6 +236,7 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
   }
 
   bool _validateForm() {
+    final applicantName = _applicantNameCtrl.text.trim();
     final name = _nameCtrl.text.trim();
     final addr = _addrCtrl.text.trim();
     final phone = _phoneCtrl.text.trim();
@@ -224,6 +244,9 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
     final close = _closeCtrl.text.trim();
     final hhMmRegex = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
 
+    final applicantErr = applicantName.isEmpty
+        ? 'Vui lòng nhập họ và tên người đăng ký'
+        : (applicantName.length < 2 ? 'Họ và tên phải từ 2 ký tự trở lên' : null);
     final nameErr = name.isEmpty
         ? 'Vui lòng nhập tên quán cắt tóc'
         : (name.length < 2 ? 'Tên quán phải từ 2 ký tự trở lên' : null);
@@ -237,21 +260,64 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
     final closeErr = close.isEmpty
         ? 'Vui lòng nhập giờ đóng cửa'
         : (!hhMmRegex.hasMatch(close) ? 'Định dạng chuẩn HH:mm (VD: 20:30)' : null);
+    final coverErr = _coverUrl.trim().isEmpty
+        ? 'Vui lòng tải lên Ảnh bìa quán cắt tóc'
+        : null;
+    final storefrontErr = _storefrontUrl.trim().isEmpty
+        ? 'Vui lòng tải lên Ảnh mặt tiền quán'
+        : null;
+    final priceListErr = _priceListUrl.trim().isEmpty
+        ? 'Vui lòng tải lên Ảnh bảng giá dịch vụ'
+        : null;
+    final cccdFrontErr = _cccdFrontUrl.trim().isEmpty
+        ? 'Vui lòng tải lên Ảnh CCCD mặt trước'
+        : null;
+    final cccdBackErr = _cccdBackUrl.trim().isEmpty
+        ? 'Vui lòng tải lên Ảnh CCCD mặt sau'
+        : null;
+    final licenseErr = _businessLicenseUrl.trim().isEmpty
+        ? 'Vui lòng tải lên Ảnh Giấy phép kinh doanh'
+        : null;
 
     setState(() {
+      _applicantNameError = applicantErr;
       _nameError = nameErr;
       _addrError = addrErr;
       _phoneError = phoneErr;
       _openError = openErr;
       _closeError = closeErr;
-      _coverError = null;
+      _coverError = coverErr;
+      _storefrontError = storefrontErr;
+      _priceListError = priceListErr;
+      _cccdFrontError = cccdFrontErr;
+      _cccdBackError = cccdBackErr;
+      _businessLicenseError = licenseErr;
     });
 
-    return nameErr == null &&
+    final isValid = applicantErr == null &&
+        nameErr == null &&
         addrErr == null &&
         phoneErr == null &&
         openErr == null &&
-        closeErr == null;
+        closeErr == null &&
+        coverErr == null &&
+        storefrontErr == null &&
+        priceListErr == null &&
+        cccdFrontErr == null &&
+        cccdBackErr == null &&
+        licenseErr == null;
+
+    if (!isValid && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: context.colorScheme.error,
+          content: const Text(
+            'Vui lòng điền đầy đủ thông tin và tải đủ tất cả các ảnh hồ sơ bắt buộc (*).',
+          ),
+        ),
+      );
+    }
+    return isValid;
   }
 
   Future<void> _paySelectedPackage() async {
@@ -330,6 +396,12 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
       latitude: _selectedLat,
       longitude: _selectedLng,
       coverImageUrl: _coverUrl,
+      applicantFullName: _applicantNameCtrl.text,
+      cccdFrontUrl: _cccdFrontUrl,
+      cccdBackUrl: _cccdBackUrl,
+      storefrontImageUrl: _storefrontUrl,
+      priceListImageUrl: _priceListUrl,
+      businessLicenseUrl: _businessLicenseUrl,
     );
 
     if (!mounted) return;
@@ -600,6 +672,17 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
                 ],
                 _buildSubmittedInfoRow(
                   context,
+                  icon: Icons.badge_outlined,
+                  label: 'Họ và tên người đăng ký',
+                  value: shop.applicantFullName.trim().isNotEmpty
+                      ? shop.applicantFullName
+                      : (shop.ownerName.trim().isNotEmpty
+                          ? shop.ownerName
+                          : 'Chủ quán'),
+                ),
+                const Divider(height: 20),
+                _buildSubmittedInfoRow(
+                  context,
                   icon: Icons.storefront_outlined,
                   label: 'Tên quán cắt tóc',
                   value: shop.name,
@@ -632,6 +715,13 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
                   label: 'Giới thiệu quán',
                   value: shop.description,
                 ),
+                const SizedBox(height: 16),
+                Text(
+                  'Hồ sơ giấy tờ & Hình ảnh đã nộp (Bấm vào ảnh để xem rõ)',
+                  style: tt.cardTitle,
+                ),
+                const SizedBox(height: 10),
+                _buildSubmittedDocImagesGrid(context, shop),
                 const SizedBox(height: 14),
                 Text(
                   'Vị trí quán trên bản đồ (${shop.latitude.toStringAsFixed(5)}, ${shop.longitude.toStringAsFixed(5)})',
@@ -866,60 +956,32 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: cs.primaryContainer,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
           ),
-          child: Text(
-            'Đã thanh toán ${paidPlan.label} (${AppFormatters.formatVnd(paidAmount)}).\n'
-            'Bước 2/2: Vui lòng hoàn tất thông tin cửa hàng dưới đây và bấm "Xác nhận" để gửi Admin phê duyệt mở quán.',
-            style: tt.bodySmallPrimary,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.verified_rounded, color: cs.primary, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Đã thanh toán ${paidPlan.label} (${AppFormatters.formatVnd(paidAmount)}).\n'
+                  'Bước 2/2: Vui lòng hoàn tất đầy đủ hồ sơ pháp lý và thông tin cửa hàng dưới đây để gửi Admin phê duyệt.',
+                  style: tt.bodySmallPrimary,
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 16),
-        TextField(
-          controller: _nameCtrl,
-          onChanged: (_) {
-            if (_nameError != null) setState(() => _nameError = null);
-          },
-          decoration: InputDecoration(
-            labelText: 'Tên quán cắt tóc (Duy nhất) *',
-            prefixIcon: const Icon(Icons.storefront),
-            errorText: _nameError,
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _addrCtrl,
-          onChanged: _onAddressTextChanged,
-          onSubmitted: (_) => _locateAddressOnMap(showFeedback: true),
-          decoration: InputDecoration(
-            labelText: 'Địa chỉ chi tiết (Duy nhất) *',
-            hintText: 'VD: 19b, ngõ 31, phố Lụa, Vạn Phúc, Hà Đông',
-            prefixIcon: const Icon(Icons.location_on_outlined),
-            errorText: _addrError,
-            suffixIcon: _geocodingAddress
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : IconButton(
-                    tooltip: 'Tìm vị trí địa chỉ này trên bản đồ',
-                    onPressed: () => _locateAddressOnMap(showFeedback: true),
-                    icon: Icon(Icons.travel_explore_rounded, color: cs.primary),
-                  ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        // Khung Bản đồ tương tác chọn & chỉnh chính xác vị trí quán
+
+        // NHÓM 1: THÔNG TIN CHỦ QUÁN & HỒ SƠ PHÁP LÝ
         Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: cs.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: cs.outline),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: cs.outlineVariant),
             boxShadow: appColors.cardShadow,
           ),
           child: Column(
@@ -927,165 +989,443 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
             children: [
               Row(
                 children: [
-                  Icon(Icons.map_outlined, size: 18, color: cs.primary),
-                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: cs.primaryContainer,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.assignment_ind_outlined,
+                      color: cs.primary,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      'Vị trí quán trên bản đồ',
-                      style: tt.cardTitle,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '1. Hồ sơ chủ quán & Pháp lý',
+                          style: tt.sectionTitle,
+                        ),
+                        Text(
+                          'Cung cấp họ tên, CCCD 2 mặt và Giấy phép kinh doanh',
+                          style: tt.captionMuted,
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _geocodingAddress
-                        ? null
-                        : () => _locateAddressOnMap(showFeedback: true),
-                    icon: const Icon(Icons.search_rounded, size: 16),
-                    label: const Text('Định vị theo địa chỉ'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _pinAtMyRealGps,
-                    icon: const Icon(Icons.my_location_rounded, size: 16),
-                    label: const Text('Vị trí GPS của tôi'),
-                  ),
-                ],
-              ),
-              if (_geocodedPlaceLabel != null) ...[
-                const SizedBox(height: 6),
-                Text(
-                  'Đã ghim: $_geocodedPlaceLabel',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: tt.bodySmallPrimary,
+              const SizedBox(height: 14),
+              TextField(
+                controller: _applicantNameCtrl,
+                onChanged: (_) {
+                  if (_applicantNameError != null) {
+                    setState(() => _applicantNameError = null);
+                  }
+                },
+                decoration: InputDecoration(
+                  labelText: 'Họ và tên người đăng ký *',
+                  hintText: 'Nhập đầy đủ họ và tên theo CCCD',
+                  prefixIcon: const Icon(Icons.person_outline_rounded),
+                  errorText: _applicantNameError,
                 ),
-              ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Căn cước công dân (CCCD 2 mặt) *',
+                style: tt.cardTitle,
+              ),
               const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: SizedBox(
-                  height: 215,
-                  child: FlutterMap(
-                    mapController: _pickerMapController,
-                    options: MapOptions(
-                      initialCenter: LatLng(_selectedLat, _selectedLng),
-                      initialZoom: 15.8,
-                      onMapReady: () {
-                        _pickerMapReady = true;
-                        _movePickerMap(_selectedLat, _selectedLng, zoom: 15.8);
-                      },
-                      onTap: (_, latLng) {
-                        setState(() {
-                          _selectedLat = latLng.latitude;
-                          _selectedLng = latLng.longitude;
-                          _geocodedPlaceLabel =
-                              'Đã ghim thủ công (${latLng.latitude.toStringAsFixed(5)}, ${latLng.longitude.toStringAsFixed(5)})';
-                        });
-                      },
+              SingleImagePickerField(
+                label: 'Ảnh CCCD mặt trước *',
+                initialUrl: _cccdFrontUrl,
+                onChanged: (url) => setState(() {
+                  _cccdFrontUrl = url;
+                  _cccdFrontError = null;
+                }),
+              ),
+              if (_cccdFrontError != null) ...[
+                const SizedBox(height: 4),
+                Text(_cccdFrontError!, style: tt.bodySmallDanger),
+              ],
+              const SizedBox(height: 12),
+              SingleImagePickerField(
+                label: 'Ảnh CCCD mặt sau *',
+                initialUrl: _cccdBackUrl,
+                onChanged: (url) => setState(() {
+                  _cccdBackUrl = url;
+                  _cccdBackError = null;
+                }),
+              ),
+              if (_cccdBackError != null) ...[
+                const SizedBox(height: 4),
+                Text(_cccdBackError!, style: tt.bodySmallDanger),
+              ],
+              const SizedBox(height: 14),
+              SingleImagePickerField(
+                label: 'Ảnh Giấy phép kinh doanh *',
+                initialUrl: _businessLicenseUrl,
+                onChanged: (url) => setState(() {
+                  _businessLicenseUrl = url;
+                  _businessLicenseError = null;
+                }),
+              ),
+              if (_businessLicenseError != null) ...[
+                const SizedBox(height: 4),
+                Text(_businessLicenseError!, style: tt.bodySmallDanger),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // NHÓM 2: THÔNG TIN & VỊ TRÍ CỬA HÀNG
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: cs.outlineVariant),
+            boxShadow: appColors.cardShadow,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: cs.primaryContainer,
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    children: [
-                      TileLayer(
-                        urlTemplate: AppConstants.osmTileUrl,
-                        userAgentPackageName: AppConstants.osmUserAgentPackage,
+                    child: Icon(
+                      Icons.storefront_rounded,
+                      color: cs.primary,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '2. Thông tin & Vị trí cửa hàng',
+                          style: tt.sectionTitle,
+                        ),
+                        Text(
+                          'Tên quán, liên hệ, giờ hoạt động và tọa độ bản đồ',
+                          style: tt.captionMuted,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _nameCtrl,
+                onChanged: (_) {
+                  if (_nameError != null) setState(() => _nameError = null);
+                },
+                decoration: InputDecoration(
+                  labelText: 'Tên quán cắt tóc (Duy nhất) *',
+                  prefixIcon: const Icon(Icons.storefront),
+                  errorText: _nameError,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _phoneCtrl,
+                keyboardType: TextInputType.phone,
+                onChanged: (_) {
+                  if (_phoneError != null) setState(() => _phoneError = null);
+                },
+                decoration: InputDecoration(
+                  labelText: 'Số điện thoại liên hệ *',
+                  prefixIcon: const Icon(Icons.phone_outlined),
+                  errorText: _phoneError,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _openCtrl,
+                      onChanged: (_) {
+                        if (_openError != null) setState(() => _openError = null);
+                      },
+                      decoration: InputDecoration(
+                        labelText: 'Giờ mở cửa *',
+                        prefixIcon: const Icon(Icons.wb_sunny_outlined),
+                        errorText: _openError,
                       ),
-                      MarkerLayer(
-                        markers: [
-                          _buildShopPinMarker(
-                            context,
-                            point: LatLng(_selectedLat, _selectedLng),
-                            label: _nameCtrl.text.trim().isNotEmpty
-                                ? _nameCtrl.text.trim()
-                                : 'Vị trí quán',
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _closeCtrl,
+                      onChanged: (_) {
+                        if (_closeError != null) {
+                          setState(() => _closeError = null);
+                        }
+                      },
+                      decoration: InputDecoration(
+                        labelText: 'Giờ đóng cửa *',
+                        prefixIcon: const Icon(Icons.nights_stay_outlined),
+                        errorText: _closeError,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _addrCtrl,
+                onChanged: _onAddressTextChanged,
+                onSubmitted: (_) => _locateAddressOnMap(showFeedback: true),
+                decoration: InputDecoration(
+                  labelText: 'Địa chỉ chi tiết (Duy nhất) *',
+                  hintText: 'VD: 19b, ngõ 31, phố Lụa, Vạn Phúc, Hà Đông',
+                  prefixIcon: const Icon(Icons.location_on_outlined),
+                  errorText: _addrError,
+                  suffixIcon: _geocodingAddress
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                          if (_hasUserGps)
-                            _buildUserPinMarker(
-                              context,
-                              point: LatLng(_userLat, _userLng),
-                            ),
-                        ],
+                        )
+                      : IconButton(
+                          tooltip: 'Tìm vị trí địa chỉ này trên bản đồ',
+                          onPressed: () =>
+                              _locateAddressOnMap(showFeedback: true),
+                          icon: Icon(
+                            Icons.travel_explore_rounded,
+                            color: cs.primary,
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: cs.outlineVariant),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.map_outlined, size: 18, color: cs.primary),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Vị trí quán trên bản đồ',
+                            style: tt.cardTitle,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _geocodingAddress
+                              ? null
+                              : () => _locateAddressOnMap(showFeedback: true),
+                          icon: const Icon(Icons.search_rounded, size: 16),
+                          label: const Text('Định vị theo địa chỉ'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _pinAtMyRealGps,
+                          icon: const Icon(Icons.my_location_rounded, size: 16),
+                          label: const Text('Vị trí GPS của tôi'),
+                        ),
+                      ],
+                    ),
+                    if (_geocodedPlaceLabel != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Đã ghim: $_geocodedPlaceLabel',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.bodySmallPrimary,
                       ),
                     ],
-                  ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: SizedBox(
+                        height: 205,
+                        child: FlutterMap(
+                          mapController: _pickerMapController,
+                          options: MapOptions(
+                            initialCenter: LatLng(_selectedLat, _selectedLng),
+                            initialZoom: 15.8,
+                            onMapReady: () {
+                              _pickerMapReady = true;
+                              _movePickerMap(
+                                _selectedLat,
+                                _selectedLng,
+                                zoom: 15.8,
+                              );
+                            },
+                            onTap: (_, latLng) {
+                              setState(() {
+                                _selectedLat = latLng.latitude;
+                                _selectedLng = latLng.longitude;
+                                _geocodedPlaceLabel =
+                                    'Đã ghim thủ công (${latLng.latitude.toStringAsFixed(5)}, ${latLng.longitude.toStringAsFixed(5)})';
+                              });
+                            },
+                          ),
+                          children: [
+                            TileLayer(
+                              urlTemplate: AppConstants.osmTileUrl,
+                              userAgentPackageName:
+                                  AppConstants.osmUserAgentPackage,
+                            ),
+                            MarkerLayer(
+                              markers: [
+                                _buildShopPinMarker(
+                                  context,
+                                  point: LatLng(_selectedLat, _selectedLng),
+                                  label: _nameCtrl.text.trim().isNotEmpty
+                                      ? _nameCtrl.text.trim()
+                                      : 'Vị trí quán',
+                                ),
+                                if (_hasUserGps)
+                                  _buildUserPinMarker(
+                                    context,
+                                    point: LatLng(_userLat, _userLng),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Tọa độ quán: ${_selectedLat.toStringAsFixed(5)}, ${_selectedLng.toStringAsFixed(5)}',
+                      style: tt.captionMuted,
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                'Tọa độ quán: ${_selectedLat.toStringAsFixed(5)}, ${_selectedLng.toStringAsFixed(5)}',
-                style: tt.captionMuted,
+              const SizedBox(height: 12),
+              TextField(
+                controller: _descCtrl,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Giới thiệu ngắn gọn về quán',
+                ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _phoneCtrl,
-          keyboardType: TextInputType.phone,
-          onChanged: (_) {
-            if (_phoneError != null) setState(() => _phoneError = null);
-          },
-          decoration: InputDecoration(
-            labelText: 'Số điện thoại liên hệ *',
-            prefixIcon: const Icon(Icons.phone_outlined),
-            errorText: _phoneError,
+        const SizedBox(height: 16),
+
+        // NHÓM 3: HÌNH ẢNH QUÁN & BẢNG GIÁ DỊCH VỤ
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: cs.outlineVariant),
+            boxShadow: appColors.cardShadow,
           ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _openCtrl,
-                onChanged: (_) {
-                  if (_openError != null) setState(() => _openError = null);
-                },
-                decoration: InputDecoration(
-                  labelText: 'Giờ mở cửa *',
-                  prefixIcon: const Icon(Icons.wb_sunny_outlined),
-                  errorText: _openError,
-                ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: cs.primaryContainer,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.collections_outlined,
+                      color: cs.primary,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '3. Hình ảnh quán & Bảng giá',
+                          style: tt.sectionTitle,
+                        ),
+                        Text(
+                          'Ảnh mặt tiền và Ảnh bảng giá sẽ được thêm vào mục Hình ảnh của quán',
+                          style: tt.captionMuted,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: _closeCtrl,
-                onChanged: (_) {
-                  if (_closeError != null) setState(() => _closeError = null);
-                },
-                decoration: InputDecoration(
-                  labelText: 'Giờ đóng cửa *',
-                  prefixIcon: const Icon(Icons.nights_stay_outlined),
-                  errorText: _closeError,
-                ),
+              const SizedBox(height: 14),
+              SingleImagePickerField(
+                label: 'Ảnh bìa quán cắt tóc *',
+                initialUrl: _coverUrl,
+                onChanged: (url) => setState(() {
+                  _coverUrl = url;
+                  _coverError = null;
+                }),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        SingleImagePickerField(
-          label: 'Ảnh bìa quán cắt tóc (Tải từ thiết bị / URL)',
-          initialUrl: _coverUrl,
-          onChanged: (url) => setState(() {
-            _coverUrl = url;
-            _coverError = null;
-          }),
-        ),
-        if (_coverError != null) ...[
-          const SizedBox(height: 4),
-          Text(_coverError!, style: tt.captionStrong),
-        ],
-        const SizedBox(height: 12),
-        TextField(
-          controller: _descCtrl,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            labelText: 'Giới thiệu ngắn gọn về quán',
+              if (_coverError != null) ...[
+                const SizedBox(height: 4),
+                Text(_coverError!, style: tt.bodySmallDanger),
+              ],
+              const SizedBox(height: 12),
+              SingleImagePickerField(
+                label: 'Ảnh mặt tiền quán *',
+                initialUrl: _storefrontUrl,
+                onChanged: (url) => setState(() {
+                  _storefrontUrl = url;
+                  _storefrontError = null;
+                }),
+              ),
+              if (_storefrontError != null) ...[
+                const SizedBox(height: 4),
+                Text(_storefrontError!, style: tt.bodySmallDanger),
+              ],
+              const SizedBox(height: 12),
+              SingleImagePickerField(
+                label: 'Ảnh bảng giá dịch vụ *',
+                initialUrl: _priceListUrl,
+                onChanged: (url) => setState(() {
+                  _priceListUrl = url;
+                  _priceListError = null;
+                }),
+              ),
+              if (_priceListError != null) ...[
+                const SizedBox(height: 4),
+                Text(_priceListError!, style: tt.bodySmallDanger),
+              ],
+            ],
           ),
         ),
         const SizedBox(height: 24),
@@ -1101,7 +1441,191 @@ class _RegisterShopPageState extends State<RegisterShopPage> {
             ),
           ),
         ),
+        const SizedBox(height: 16),
       ],
+    );
+  }
+
+  Widget _buildSubmittedDocImagesGrid(BuildContext context, ShopEntity shop) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final docs = <({String label, String url})>[
+      if (shop.coverImageUrl.trim().isNotEmpty)
+        (label: 'Ảnh bìa quán', url: shop.coverImageUrl.trim()),
+      if (shop.storefrontImageUrl.trim().isNotEmpty)
+        (label: 'Ảnh mặt tiền quán', url: shop.storefrontImageUrl.trim()),
+      if (shop.priceListImageUrl.trim().isNotEmpty)
+        (label: 'Ảnh bảng giá', url: shop.priceListImageUrl.trim()),
+      if (shop.cccdFrontUrl.trim().isNotEmpty)
+        (label: 'CCCD mặt trước', url: shop.cccdFrontUrl.trim()),
+      if (shop.cccdBackUrl.trim().isNotEmpty)
+        (label: 'CCCD mặt sau', url: shop.cccdBackUrl.trim()),
+      if (shop.businessLicenseUrl.trim().isNotEmpty)
+        (label: 'Giấy phép kinh doanh', url: shop.businessLicenseUrl.trim()),
+    ];
+
+    if (docs.isEmpty) {
+      return Text('Chưa có ảnh đính kèm.', style: tt.bodySmallMuted);
+    }
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: docs.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: 1.22,
+      ),
+      itemBuilder: (ctx, i) {
+        final item = docs[i];
+        return InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _showFullImagePreview(
+            context,
+            title: item.label,
+            imageUrl: item.url,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: cs.outlineVariant),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.network(
+                        item.url,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: cs.surfaceContainerLow,
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.broken_image_outlined,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        right: 6,
+                        top: 6,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: cs.inverseSurface.withValues(alpha: 0.7),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.zoom_in_rounded,
+                            size: 15,
+                            color: cs.onInverseSurface,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
+                  child: Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: tt.captionStrong,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showFullImagePreview(
+    BuildContext context, {
+    required String title,
+    required String imageUrl,
+  }) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
+    showDialog<void>(
+      context: context,
+      barrierColor: cs.scrim.withValues(alpha: 0.55),
+      builder: (dialogCtx) => Dialog(
+        backgroundColor: cs.surface.withValues(alpha: 0),
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: cs.surface,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: appColors.cardShadow,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: tt.cardTitle,
+                    ),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => Navigator.of(dialogCtx).pop(),
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: cs.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Flexible(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: cs.surface,
+                  borderRadius: BorderRadius.circular(18),
+                  boxShadow: appColors.cardShadow,
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InteractiveViewer(
+                  minScale: 0.8,
+                  maxScale: 4.5,
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'Không thể tải ảnh',
+                        style: tt.bodyRegular,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

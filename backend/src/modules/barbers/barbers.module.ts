@@ -121,7 +121,7 @@ export class BarbersService {
     await this.notificationsService.createAndPush({
       recipientId: candidate.id,
       title: `Lời mời làm Barber tại ${shop.name}`,
-      body: `Quản lý quán "${shop.name}" mời bạn gia nhập đội ngũ Barber với lương cứng ${validSalary.toLocaleString('vi-VN')}đ + 10% hoa hồng. Hãy nhấn Chấp nhận hoặc Từ chối.`,
+      body: `Quản lý quán "${shop.name}" mời bạn gia nhập đội ngũ Barber của quán. Hãy nhấn Chấp nhận hoặc Từ chối.`,
       type: NotificationType.BARBER_INVITE,
       metadata: {
         shopId: shop.id,

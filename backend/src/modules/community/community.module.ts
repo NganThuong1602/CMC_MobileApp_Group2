@@ -290,6 +290,7 @@ export class CommunityService {
         customerId,
         rating: Math.min(5, Math.max(1, dto.rating)),
         comment: dto.comment,
+        isSeenByManager: false,
       }),
     );
 
@@ -304,6 +305,20 @@ export class CommunityService {
     });
 
     return saved;
+  }
+
+  async markShopReviewsSeen(shopId: string, userId: string) {
+    const shop = await this.shopRepo.findOne({ where: { id: shopId } });
+    if (!shop) {
+      throw new NotFoundException('Không tìm thấy quán');
+    }
+    if (shop.ownerId === userId) {
+      await this.reviewRepo.update(
+        { shopId, isSeenByManager: false },
+        { isSeenByManager: true },
+      );
+    }
+    return { success: true };
   }
 
   async openOrCreateShopGroupChat(shopId: string, customerId: string) {
@@ -530,6 +545,15 @@ export class CommunityController {
     @Body() dto: { rating: number; comment: string },
   ) {
     return this.service.addReview(shopId, user.id, dto);
+  }
+
+  @Patch('shops/:shopId/reviews/mark-seen')
+  @UseGuards(JwtAuthGuard)
+  markReviewsSeen(
+    @Param('shopId') shopId: string,
+    @CurrentUser() user: UserEntity,
+  ) {
+    return this.service.markShopReviewsSeen(shopId, user.id);
   }
 
   @Post('chat/shops/:shopId/open')

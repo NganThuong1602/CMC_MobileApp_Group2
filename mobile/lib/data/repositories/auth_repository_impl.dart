@@ -107,12 +107,13 @@ class AuthRepositoryImpl implements AuthRepository {
       socketService.connect(remoteRes.user.id);
       return Result.success(remoteRes.user);
     } on DioException catch (e) {
-      if (e.response != null) {
+      final statusCode = e.response?.statusCode ?? 0;
+      if (e.response != null && statusCode >= 400 && statusCode < 500) {
         return Result.failure(
           AuthFailure(_extractDioError(e, 'Email hoặc mật khẩu không chính xác')),
         );
       }
-      // Fallback sang dữ liệu Seeded Local khi chạy độc lập không bật server NestJS
+      // Fallback sang dữ liệu Seeded Local khi chạy độc lập hoặc khi Ngrok báo 502 (chưa bật server NestJS)
     } catch (_) {}
 
     final storedPass = db.passwordsByEmail[normalizedEmail];

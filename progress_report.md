@@ -171,6 +171,47 @@
 - **Diễn đàn (`community.module.ts`, `social_repository_impl.dart`, `highlights_page.dart`):** Mở rộng `GET /api/v1/posts/forum` và fallback offline để hiển thị thêm toàn bộ bài đăng của tài khoản giữ vai trò **`MANAGER`** (gắn kèm tên quán quản lý `authorShopName` và huy hiệu cửa tiệm), song song với bài đăng của **`BARBER`** từ thời điểm `joinedAt`.
 - **Header (`barbersmart_header.dart`):** Nút tròn góc trên bên phải của `BarberSmartHeader` tự động lấy `user.avatarUrl` từ `AuthCubit` (hoặc `AppConstants.defaultAvatarUrl` nếu tài khoản chưa tải ảnh, kèm fallback về icon user mặc định khi chưa đăng nhập hoặc tải ảnh lỗi) để hiển thị ảnh đại diện thật của tài khoản đang đăng nhập trên toàn bộ các tab chính.
 
+### 14. Bản cập nhật v4.2 — Tối giản thanh toán tại quán, lược bỏ Lương/Doanh thu/Thu nhập, ẩn khu vực Gia hạn tại trang Quản lý thông tin & Popup Banner Sale % kiểu Shopee
+- **Đặt lịch (`booking_flow_page.dart`, `in_memory_database.dart`):** Bỏ lựa chọn thanh toán bằng QR SePay khi đặt lịch cắt tóc, chỉ giữ duy nhất phương thức **Thanh toán tại quán** (`PaymentMethod.atShop`).
+- **Role Manager & Role Barber (`my_shop_page.dart`, `barber_hub_page.dart`):**
+  - Bỏ mục **`Doanh thu và lương`** ở màn Quản lý quán của Manager và bỏ mục **`Thu nhập`** ở màn trung tâm của Barber.
+  - Bỏ các câu thông báo cộng hoa hồng/doanh thu khi Barber xác nhận hoàn thành đơn.
+- **Mời & Quản lý Barber (`my_shop_page.dart`, `notifications_page.dart`, `barber_repository_impl.dart`, `barbers.module.ts`):**
+  - Bỏ ô nhập **Lương cứng đề xuất (VNĐ)** và dòng gợi ý thử nghiệm khi Manager gửi lời mời làm Barber.
+  - Bỏ dòng hiển thị lương cứng + hoa hồng và nút sửa lương cứng trong danh sách **Đội ngũ Barber hiện tại** (chỉ giữ thông tin liên hệ và nút xoá Barber).
+  - Bỏ toàn bộ nội dung lương cứng & hoa hồng trong thông báo lời mời làm Barber và màn chi tiết lời mời.
+- **Chi tiết quán — Tab Barber (`shop_detail_bottom_sheet.dart`):** Bỏ dòng chữ **`Xem trang cá nhân →`** ở từng thẻ Barber (bấm vào ảnh đại diện hoặc tên Barber vẫn mở trang cá nhân bình thường).
+- **Quản lý thông tin & Gói quán (`my_shop_page.dart`):** Ẩn danh sách 4 gói **`Gia hạn gói quán qua SePay`** khỏi trang `Quản lý thông tin & Gói quán` (giữ nguyên khung `Trạng thái gói quán hiện tại` và toàn bộ logic kiểm tra hạn/thông báo gia hạn ở hệ thống).
+- **Popup Banner Sale % kiểu Shopee ở Trang chủ (`home_page.dart`):** Khi tài khoản khách hàng (`USER`) đăng nhập vào Trang chủ và hệ thống đang có mã giảm giá hiệu lực từ Admin, tự động hiển thị Popup Banner **`SALE <số>%`** (1 lần mỗi phiên đăng nhập, có nút `X` để đóng); khi bấm vào banner sẽ tự động đóng popup và chuyển sang tab lọc **`Nổi bật`** trên Trang chủ.
+
+### 15. Bản cập nhật v4.3 — Mở rộng Hồ sơ pháp lý & Hình ảnh khi Đăng ký quán, Admin xem ảnh phóng to & Từ chối kèm lý do, Tự động chuyển sang Quản lý dịch vụ khi được duyệt
+- **Đăng ký quán (`register_shop_page.dart`, `shop_entity.dart`, `app_models.dart`, `shop_repository_impl.dart`, `shop.entity.ts`, `shops.module.ts`):**
+  - Bố cục lại form đăng ký quán gọn gàng theo 3 nhóm thẻ: **(1) Hồ sơ chủ quán & Pháp lý** (`Họ và tên người đăng ký *`, `Ảnh CCCD mặt trước *`, `Ảnh CCCD mặt sau *`, `Ảnh Giấy phép kinh doanh *`), **(2) Thông tin & Vị trí cửa hàng**, và **(3) Hình ảnh quán & Bảng giá** (`Ảnh bìa quán cắt tóc *`, `Ảnh mặt tiền quán *`, `Ảnh bảng giá dịch vụ *`).
+  - Tự động đưa **Ảnh mặt tiền quán** và **Ảnh bảng giá dịch vụ** vào bộ sưu tập **Hình ảnh của quán** (`galleryUrls`).
+  - Ở màn **Trạng thái đăng ký quán**, hiển thị đầy đủ họ tên và lưới 6 ảnh hồ sơ đã nộp (hỗ trợ bấm vào từng ảnh để phóng to xem rõ).
+- **Admin Duyệt mở quán & Từ chối kèm lý do (`admin_hub_page.dart`, `shops.module.ts`, `shop_repository_impl.dart`):**
+  - Admin xem được đầy đủ họ tên người đăng ký và toàn bộ 6 ảnh hồ sơ (`Ảnh bìa`, `Ảnh mặt tiền`, `Ảnh bảng giá`, `CCCD mặt trước`, `CCCD mặt sau`, `Giấy phép kinh doanh`), bấm vào bất kỳ ảnh nào sẽ mở trình xem ảnh toàn màn hình hỗ trợ zoom `InteractiveViewer`.
+  - Khi Admin bấm **`Từ chối`**, hiển thị hộp thoại bắt buộc nhập **Ghi chú lý do từ chối** và gửi trực tiếp nguyên văn lý do đó về thông báo của người đăng ký (đồng thời hoàn lại quyền sử dụng gói đã thanh toán để người đăng ký chỉnh sửa và gửi lại hồ sơ).
+- **Tự động mở Quản lý dịch vụ sau khi được Admin duyệt quán (`app.dart`, `socket_service.dart`, `app_router.dart`, `main_shell_page.dart`, `my_shop_page.dart`, `notifications_page.dart`):**
+  - Ngay khi được Admin duyệt mở quán (qua sự kiện realtime `user.role_updated`, khi bấm vào thông báo duyệt quán, hoặc lần đầu vào Quản lý quán khi quán mới duyệt chưa có dịch vụ), hệ thống tự động đưa chủ quán sang màn hình **`Quản lý dịch vụ`** để thêm các dịch vụ cho quán.
+
+### 16. Bản cập nhật v4.4 — Tối ưu chuyển tab Tất cả/Nổi bật 0ms, Popup ảnh trong suốt, Luồng Báo cáo quán cho Admin & Xem đánh giá cho Quản lý
+- **Tối ưu Trang chủ & Popup Sale % (`home_page.dart`, `shop_discovery_cubit.dart`):**
+  - Tách kiểm tra Popup Banner Sale % độc lập với quyền vị trí và tự động kích hoạt ngay khi danh sách quán tải xong, đảm bảo hiện đồng bộ trên cả trình duyệt Chrome lẫn Android Emulator.
+  - Bộ lọc tab **`Tất cả` ↔ `Nổi bật`** và ô tìm kiếm ở Trang chủ lọc trực tiếp trên bộ nhớ đệm `allNearbyShops` giúp giao diện phản hồi tức thì (0ms delay).
+- **Đăng ký quán & Từ chối duyệt (`payments.module.ts`, `shops.module.ts`, `shop_repository_impl.dart`, `notifications_page.dart`):**
+  - Khi Admin từ chối duyệt quán, giao dịch gói của lần đăng ký đó được đánh dấu đã sử dụng/hủy (`consumed: true, rejected: true`), khi người dùng vào lại **Đăng ký quán** sẽ quay về Bước 1 chọn gói từ đầu (không còn hiện "Đã thanh toán").
+  - Khi bấm vào thông báo **`Yêu cầu mở quán đã bị từ chối`** tại màn Thông báo, hiển thị **Popup Dialog** chi tiết nội dung & lý do từ chối của Admin; khi bấm vào thông báo **`Quán đã được Admin phê duyệt`** thì chuyển thẳng sang trang Quản lý quán.
+- **Xem ảnh Popup nền trong suốt & Tối giản thẻ duyệt Admin (`register_shop_page.dart`, `admin_hub_page.dart`):**
+  - Đổi khung phóng to xem chi tiết ảnh hồ sơ từ nền xám đặc toàn màn hình sang **Popup nền trong suốt** nổi trực tiếp trên trang hiện tại.
+  - Bỏ nút chữ `Xem đầy đủ hồ sơ & vị trí bản đồ` trên thẻ chờ duyệt của Admin (bấm vào thẻ vẫn mở đầy đủ thông tin).
+  - Trong trang **`Danh sách quán`** của Admin, bấm vào bất kỳ quán nào cũng mở bảng xem toàn bộ thông tin, hình ảnh hồ sơ và vị trí bản đồ của quán đó.
+- **Luồng Báo cáo quán (`shop_detail_bottom_sheet.dart`, `admin_hub_page.dart`, `community.entity.ts`, `shops.module.ts`):**
+  - Người dùng bấm icon **Báo cáo quán** (lá cờ đỏ) trong chi tiết quán để chọn lý do mẫu hoặc chọn **Khác** để tự nhập nội dung và gửi về Admin.
+  - Trang Admin có thêm mục **`Báo cáo`** hiển thị danh sách gồm **Người báo cáo**, **Quán bị báo cáo** và **Nội dung báo cáo**.
+- **Luồng Xem đánh giá cho Quản lý (`my_shop_page.dart`):**
+  - Trang Quản lý quán có thêm mục **`Xem đánh giá`** để chủ quán xem điểm trung bình và danh sách toàn bộ đánh giá của khách hàng (tên người đánh giá, số sao và nội dung đánh giá).
+
 ---
 
 ## 🚧 Đang làm dở

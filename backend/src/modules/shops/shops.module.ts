@@ -32,6 +32,7 @@ import {
   SHOP_PACKAGE_CONFIG,
   ShopEntity,
   ShopPackagePlan,
+  ShopReportEntity,
   TransactionEntity,
   TransactionStatus,
   TransactionType,
@@ -64,6 +65,8 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
     private readonly txRepo: Repository<TransactionEntity>,
     @InjectRepository(DiscountCodeEntity)
     private readonly discountRepo: Repository<DiscountCodeEntity>,
+    @InjectRepository(ShopReportEntity)
+    private readonly reportRepo: Repository<ShopReportEntity>,
     private readonly notificationsService: NotificationsService,
     private readonly realtimeGateway: RealtimeGateway,
   ) {}
@@ -318,9 +321,15 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
       { rating: avgRating, reviewCount },
       activeDiscount,
       {
-        ownerName: shop.owner?.fullName ?? '',
+        ownerName: shop.applicantFullName || shop.owner?.fullName || '',
         ownerPhone: shop.owner?.phone ?? '',
         ownerEmail: shop.owner?.email ?? '',
+        applicantFullName: shop.applicantFullName || shop.owner?.fullName || '',
+        cccdFrontUrl: shop.cccdFrontUrl ?? '',
+        cccdBackUrl: shop.cccdBackUrl ?? '',
+        storefrontImageUrl: shop.storefrontImageUrl ?? '',
+        priceListImageUrl: shop.priceListImageUrl ?? '',
+        businessLicenseUrl: shop.businessLicenseUrl ?? '',
       },
     );
 
@@ -377,6 +386,12 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
       coverUrl?: string;
       latitude?: number;
       longitude?: number;
+      applicantFullName?: string;
+      cccdFrontUrl?: string;
+      cccdBackUrl?: string;
+      storefrontImageUrl?: string;
+      priceListImageUrl?: string;
+      businessLicenseUrl?: string;
     },
   ) {
     const user = await this.userRepo.findOne({ where: { id: ownerId } });
@@ -406,9 +421,17 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
           (t) =>
             t.paymentCode === dto.paymentCode &&
             t.metadataJson?.consumed !== true &&
+            t.metadataJson?.rejected !== true &&
+            !('shopId' in (t.metadataJson ?? {})) &&
             !t.shopId,
         )
-      : paidTxs.find((t) => t.metadataJson?.consumed !== true && !t.shopId);
+      : paidTxs.find(
+          (t) =>
+            t.metadataJson?.consumed !== true &&
+            t.metadataJson?.rejected !== true &&
+            !('shopId' in (t.metadataJson ?? {})) &&
+            !t.shopId,
+        );
 
     if (!validTx) {
       throw new BadRequestException(
@@ -450,6 +473,17 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
       ShopPackagePlan.MEMBER_MONTHLY;
     const meta = SHOP_PACKAGE_CONFIG[plan] ?? SHOP_PACKAGE_CONFIG[ShopPackagePlan.MEMBER_MONTHLY];
 
+    const cleanCover = dto.coverUrl?.trim() || dto.storefrontImageUrl?.trim() || undefined;
+    const cleanStorefront = dto.storefrontImageUrl?.trim() || undefined;
+    const cleanPriceList = dto.priceListImageUrl?.trim() || undefined;
+    const mergedGallery = Array.from(
+      new Set(
+        [cleanStorefront, cleanPriceList, cleanCover].filter(
+          (u): u is string => Boolean(u && u.length > 0),
+        ),
+      ),
+    );
+
     const shop = await this.shopRepo.save(
       this.shopRepo.create({
         ownerId,
@@ -459,8 +493,8 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
         openTime: dto.openTime || '08:30',
         closeTime: dto.closeTime || '20:30',
         description: dto.description?.trim() ?? '',
-        coverUrl: dto.coverUrl?.trim() || undefined,
-        galleryUrls: dto.coverUrl?.trim() ? [dto.coverUrl.trim()] : [],
+        coverUrl: cleanCover,
+        galleryUrls: mergedGallery,
         latitude: Number(dto.latitude) || 20.9768,
         longitude: Number(dto.longitude) || 105.7724,
         rating: 0,
@@ -470,6 +504,12 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
         isCooperation: meta.isCooperation,
         subscriptionExpiresAt: null,
         highlightExpiresAt: null,
+        applicantFullName: dto.applicantFullName?.trim() || user.fullName,
+        cccdFrontUrl: dto.cccdFrontUrl?.trim() || undefined,
+        cccdBackUrl: dto.cccdBackUrl?.trim() || undefined,
+        storefrontImageUrl: cleanStorefront,
+        priceListImageUrl: cleanPriceList,
+        businessLicenseUrl: dto.businessLicenseUrl?.trim() || undefined,
       }),
     );
 
@@ -539,9 +579,15 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
         ratingMap.get(s.id) ?? { rating: 0, reviewCount: 0 },
         activeDiscount,
         {
-          ownerName: s.owner?.fullName ?? '',
+          ownerName: s.applicantFullName || s.owner?.fullName || '',
           ownerPhone: s.owner?.phone ?? '',
           ownerEmail: s.owner?.email ?? '',
+          applicantFullName: s.applicantFullName || s.owner?.fullName || '',
+          cccdFrontUrl: s.cccdFrontUrl ?? '',
+          cccdBackUrl: s.cccdBackUrl ?? '',
+          storefrontImageUrl: s.storefrontImageUrl ?? '',
+          priceListImageUrl: s.priceListImageUrl ?? '',
+          businessLicenseUrl: s.businessLicenseUrl ?? '',
           paymentCode: tx?.paymentCode ?? '',
           paymentAmount: tx?.amount ?? 0,
           paidAt: tx?.paidAt ?? null,
@@ -562,22 +608,41 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
       relations: ['owner'],
       order: { createdAt: 'DESC' },
     });
-    const [ratingMap, activeDiscount] = await Promise.all([
+    const [ratingMap, activeDiscount, regTxs] = await Promise.all([
       this.computeRatingStatsMap(list.map((s) => s.id)),
       this.getActiveBestDiscount(),
+      list.length > 0
+        ? this.txRepo.find({
+            where: {
+              shopId: In(list.map((s) => s.id)),
+              type: TransactionType.REGISTER_SHOP,
+            },
+            order: { createdAt: 'DESC' },
+          })
+        : Promise.resolve([]),
     ]);
-    return list.map((s) =>
-      this.enrichShop(
+    return list.map((s) => {
+      const tx = regTxs.find((t) => t.shopId === s.id);
+      return this.enrichShop(
         s,
         ratingMap.get(s.id) ?? { rating: 0, reviewCount: 0 },
         activeDiscount,
         {
-          ownerName: s.owner?.fullName ?? '',
+          ownerName: s.applicantFullName || s.owner?.fullName || '',
           ownerPhone: s.owner?.phone ?? '',
           ownerEmail: s.owner?.email ?? '',
+          applicantFullName: s.applicantFullName || s.owner?.fullName || '',
+          cccdFrontUrl: s.cccdFrontUrl ?? '',
+          cccdBackUrl: s.cccdBackUrl ?? '',
+          storefrontImageUrl: s.storefrontImageUrl ?? '',
+          priceListImageUrl: s.priceListImageUrl ?? '',
+          businessLicenseUrl: s.businessLicenseUrl ?? '',
+          paymentCode: tx?.paymentCode ?? '',
+          paymentAmount: tx?.amount ?? 0,
+          paidAt: tx?.paidAt ?? null,
         },
-      ),
-    );
+      );
+    });
   }
 
   /**
@@ -623,9 +688,13 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
     await this.notificationsService.createAndPush({
       recipientId: shop.ownerId,
       title: 'Quán của bạn đã được Admin phê duyệt!',
-      body: `Chúc mừng! Quán "${shop.name}" (${meta.label}) đã được Admin duyệt hoạt động.`,
+      body: `Chúc mừng! Quán "${shop.name}" (${meta.label}) đã được Admin duyệt hoạt động. Hãy thêm các dịch vụ cho quán của bạn.`,
       type: NotificationType.SHOP_APPROVAL,
-      metadata: { shopId: shop.id, approved: true },
+      metadata: {
+        shopId: shop.id,
+        approved: true,
+        action: 'OPEN_MANAGE_SERVICES',
+      },
     });
 
     return this.findDetail(shop.id);
@@ -672,7 +741,11 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
   /**
    * Admin: Từ chối yêu cầu mở quán hoặc Xoá một quán đang hoạt động khỏi hệ thống.
    */
-  async deleteShopByAdmin(adminUser: UserEntity, shopId: string) {
+  async deleteShopByAdmin(
+    adminUser: UserEntity,
+    shopId: string,
+    reason?: string,
+  ) {
     if (adminUser.role !== UserRole.ADMIN) {
       throw new ForbiddenException('Chỉ Admin mới có quyền xoá hoặc từ chối quán');
     }
@@ -686,6 +759,29 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
 
     const wasActive = shop.isActive;
     const shopName = shop.name;
+    const cleanReason = reason?.trim() ?? '';
+
+    if (!wasActive) {
+      const regTxs = await this.txRepo.find({
+        where: { userId: shop.ownerId, type: TransactionType.REGISTER_SHOP },
+      });
+      for (const tx of regTxs) {
+        if (tx.shopId === shop.id || !tx.shopId) {
+          tx.shopId = null;
+          tx.metadataJson = {
+            ...(tx.metadataJson ?? {}),
+            consumed: true,
+            rejected: true,
+            rejectedShopId: shop.id,
+          };
+          await this.txRepo.save(tx);
+        }
+      }
+    }
+
+    const rejectBody = cleanReason
+      ? `Yêu cầu đăng ký mở quán "${shopName}" chưa được Admin phê duyệt.\nLý do từ chối: "${cleanReason}"`
+      : `Yêu cầu đăng ký mở quán "${shopName}" chưa được Admin phê duyệt.`;
 
     await this.deleteShopAndNotify(
       shop,
@@ -694,9 +790,13 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
         : `Yêu cầu mở quán "${shopName}" đã bị từ chối`,
       wasActive
         ? `Admin hệ thống đã gỡ quán "${shopName}". Tài khoản của bạn đã chuyển về vai trò Khách hàng.`
-        : `Yêu cầu đăng ký mở quán "${shopName}" chưa được Admin phê duyệt. Bạn có thể kiểm tra thông tin và đăng ký lại.`,
+        : rejectBody,
       NotificationType.SHOP_APPROVAL,
-      { shopId, approved: false },
+      {
+        shopId,
+        approved: false,
+        ...(cleanReason ? { rejectionReason: cleanReason } : {}),
+      },
     );
 
     return { deleted: true, id: shopId };
@@ -847,6 +947,80 @@ export class ShopsService implements OnModuleInit, OnModuleDestroy {
       barberPayrolls,
     };
   }
+
+  async createShopReport(reporterId: string, shopId: string, reason: string) {
+    const cleanReason = reason?.trim() ?? '';
+    if (!cleanReason) {
+      throw new BadRequestException('Vui lòng nhập nội dung báo cáo');
+    }
+    const shop = await this.shopRepo.findOne({ where: { id: shopId } });
+    if (!shop) {
+      throw new NotFoundException('Không tìm thấy quán bị báo cáo');
+    }
+    const reporter = await this.userRepo.findOne({ where: { id: reporterId } });
+    if (!reporter) {
+      throw new NotFoundException('Không tìm thấy người báo cáo');
+    }
+
+    const saved = await this.reportRepo.save(
+      this.reportRepo.create({
+        shopId: shop.id,
+        reporterId: reporter.id,
+        reason: cleanReason,
+        isSeenByAdmin: false,
+      }),
+    );
+
+    // Yêu cầu v4.5: Không gửi thông báo chuông khi có người báo cáo quán,
+    // chỉ hiển thị số lượng báo cáo mới màu đỏ trên dòng "Báo cáo" ở trang Admin.
+    return {
+      id: saved.id,
+      shopId: shop.id,
+      shopName: shop.name,
+      shopAddress: shop.address,
+      reporterId: reporter.id,
+      reporterName: reporter.fullName,
+      reporterEmail: reporter.email,
+      reporterPhone: reporter.phone,
+      reason: saved.reason,
+      isSeenByAdmin: Boolean(saved.isSeenByAdmin),
+      createdAt: saved.createdAt,
+    };
+  }
+
+  async findAdminShopReports(adminUser: UserEntity) {
+    if (adminUser.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Chỉ Admin mới có quyền xem danh sách báo cáo');
+    }
+    const reports = await this.reportRepo.find({
+      relations: ['shop', 'reporter'],
+      order: { createdAt: 'DESC' },
+    });
+    return reports.map((r) => ({
+      id: r.id,
+      shopId: r.shopId,
+      shopName: r.shop?.name ?? 'Quán đã xoá',
+      shopAddress: r.shop?.address ?? '',
+      reporterId: r.reporterId,
+      reporterName: r.reporter?.fullName ?? 'Người dùng',
+      reporterEmail: r.reporter?.email ?? '',
+      reporterPhone: r.reporter?.phone ?? '',
+      reason: r.reason,
+      isSeenByAdmin: Boolean(r.isSeenByAdmin),
+      createdAt: r.createdAt,
+    }));
+  }
+
+  async markAdminShopReportsSeen(adminUser: UserEntity) {
+    if (adminUser.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Chỉ Admin mới có quyền cập nhật báo cáo');
+    }
+    await this.reportRepo.update(
+      { isSeenByAdmin: false },
+      { isSeenByAdmin: true },
+    );
+    return { success: true };
+  }
 }
 
 @Controller('shops')
@@ -902,6 +1076,12 @@ export class ShopsController {
       coverUrl?: string;
       latitude?: number;
       longitude?: number;
+      applicantFullName?: string;
+      cccdFrontUrl?: string;
+      cccdBackUrl?: string;
+      storefrontImageUrl?: string;
+      priceListImageUrl?: string;
+      businessLicenseUrl?: string;
     },
   ) {
     return this.shopsService.registerShopWithPaidPackage(user.id, dto);
@@ -919,6 +1099,28 @@ export class ShopsController {
     return this.shopsService.findAdminActiveShops(user);
   }
 
+  @Get('admin/reports')
+  @UseGuards(JwtAuthGuard)
+  findAdminReports(@CurrentUser() user: UserEntity) {
+    return this.shopsService.findAdminShopReports(user);
+  }
+
+  @Patch('admin/reports/mark-seen')
+  @UseGuards(JwtAuthGuard)
+  markAdminReportsSeen(@CurrentUser() user: UserEntity) {
+    return this.shopsService.markAdminShopReportsSeen(user);
+  }
+
+  @Post(':id/reports')
+  @UseGuards(JwtAuthGuard)
+  createReport(
+    @Param('id') id: string,
+    @CurrentUser() user: UserEntity,
+    @Body() body: { reason: string },
+  ) {
+    return this.shopsService.createShopReport(user.id, id, body?.reason ?? '');
+  }
+
   @Patch(':id/approve')
   @UseGuards(JwtAuthGuard)
   approveShop(@Param('id') id: string, @CurrentUser() user: UserEntity) {
@@ -927,8 +1129,17 @@ export class ShopsController {
 
   @Delete(':id/admin')
   @UseGuards(JwtAuthGuard)
-  deleteShopByAdmin(@Param('id') id: string, @CurrentUser() user: UserEntity) {
-    return this.shopsService.deleteShopByAdmin(user, id);
+  deleteShopByAdmin(
+    @Param('id') id: string,
+    @CurrentUser() user: UserEntity,
+    @Body() body?: { reason?: string },
+    @Query('reason') queryReason?: string,
+  ) {
+    return this.shopsService.deleteShopByAdmin(
+      user,
+      id,
+      body?.reason ?? queryReason,
+    );
   }
 
   @Get('me/owned')
@@ -1011,6 +1222,7 @@ export class ShopsController {
       UserEntity,
       TransactionEntity,
       DiscountCodeEntity,
+      ShopReportEntity,
     ]),
   ],
   controllers: [ShopsController],

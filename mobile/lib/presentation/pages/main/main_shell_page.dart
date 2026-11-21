@@ -23,6 +23,7 @@ import '../map/map_page.dart';
 class MainShellPage extends StatefulWidget {
   final int? requestedTabIndex;
   final bool openCustomerConsult;
+  final bool openManageServices;
   final String? initialChatRoomId;
   final String? initialCustomerHint;
   final String? navigationToken;
@@ -31,6 +32,7 @@ class MainShellPage extends StatefulWidget {
     super.key,
     this.requestedTabIndex,
     this.openCustomerConsult = false,
+    this.openManageServices = false,
     this.initialChatRoomId,
     this.initialCustomerHint,
     this.navigationToken,
@@ -152,6 +154,7 @@ class _MainShellPageState extends State<MainShellPage> {
           const MapPage(),
           MyShopPage(
             openCustomerConsult: widget.openCustomerConsult,
+            openManageServices: widget.openManageServices,
             initialChatRoomId: widget.initialChatRoomId,
             initialCustomerHint: widget.initialCustomerHint,
             navigationToken: widget.navigationToken,

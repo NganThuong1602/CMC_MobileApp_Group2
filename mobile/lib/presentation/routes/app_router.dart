@@ -70,12 +70,15 @@ class AppRouter {
             );
             final openConsult =
                 state.uri.queryParameters['openConsult'] == '1';
+            final openServices =
+                state.uri.queryParameters['openServices'] == '1';
             final roomId = state.uri.queryParameters['roomId'];
             final customerHint = state.uri.queryParameters['customerHint'];
             final requestToken = state.uri.queryParameters['ts'];
             return MainShellPage(
               requestedTabIndex: tabParam,
               openCustomerConsult: openConsult,
+              openManageServices: openServices,
               initialChatRoomId: roomId,
               initialCustomerHint: customerHint,
               navigationToken: requestToken,

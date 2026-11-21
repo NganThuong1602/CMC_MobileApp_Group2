@@ -63,6 +63,7 @@ class ShopRepositoryImpl implements ShopRepository {
   }
 
   static final List<DiscountCodeEntity> _offlineDiscountCodes = [];
+  static final List<ShopReportEntity> _offlineShopReports = [];
   static final Map<String, ShopPackagePlan> _pendingPackageByPaymentCode = {};
   static final Map<
       String,
@@ -899,13 +900,32 @@ class ShopRepositoryImpl implements ShopRepository {
     required double latitude,
     required double longitude,
     String? coverImageUrl,
+    String? applicantFullName,
+    String? cccdFrontUrl,
+    String? cccdBackUrl,
+    String? storefrontImageUrl,
+    String? priceListImageUrl,
+    String? businessLicenseUrl,
   }) async {
     final cleanName = name.trim();
     final cleanAddr = address.trim();
+    final cleanApplicant = (applicantFullName ?? '').trim();
+    final cleanCccdFront = (cccdFrontUrl ?? '').trim();
+    final cleanCccdBack = (cccdBackUrl ?? '').trim();
+    final cleanStorefront = (storefrontImageUrl ?? '').trim();
+    final cleanPriceList = (priceListImageUrl ?? '').trim();
+    final cleanLicense = (businessLicenseUrl ?? '').trim();
     final resolvedCover =
         coverImageUrl != null && coverImageUrl.trim().isNotEmpty
             ? coverImageUrl.trim()
-            : 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=900&q=80';
+            : (cleanStorefront.isNotEmpty
+                ? cleanStorefront
+                : 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=900&q=80');
+    final mergedGallery = <String>{
+      if (cleanStorefront.isNotEmpty) cleanStorefront,
+      if (cleanPriceList.isNotEmpty) cleanPriceList,
+      if (resolvedCover.isNotEmpty) resolvedCover,
+    }.toList();
 
     try {
       final created = await remote.submitRegisterShopForm({
@@ -921,6 +941,12 @@ class ShopRepositoryImpl implements ShopRepository {
         'latitude': latitude,
         'longitude': longitude,
         'coverUrl': resolvedCover,
+        if (cleanApplicant.isNotEmpty) 'applicantFullName': cleanApplicant,
+        if (cleanCccdFront.isNotEmpty) 'cccdFrontUrl': cleanCccdFront,
+        if (cleanCccdBack.isNotEmpty) 'cccdBackUrl': cleanCccdBack,
+        if (cleanStorefront.isNotEmpty) 'storefrontImageUrl': cleanStorefront,
+        if (cleanPriceList.isNotEmpty) 'priceListImageUrl': cleanPriceList,
+        if (cleanLicense.isNotEmpty) 'businessLicenseUrl': cleanLicense,
       });
       _syncShopToLocal(created);
       return Result.success(created);
@@ -949,6 +975,8 @@ class ShopRepositoryImpl implements ShopRepository {
       );
     }
 
+    final ownerIdx = db.users.indexWhere((u) => u.id == userId);
+    final ownerUser = ownerIdx != -1 ? db.users[ownerIdx] : db.currentUser;
     final newShopId = 'shop_${DateTime.now().millisecondsSinceEpoch}';
     final newShop = ShopEntity(
       id: newShopId,
@@ -964,15 +992,28 @@ class ShopRepositoryImpl implements ShopRepository {
       latitude: latitude,
       longitude: longitude,
       coverImageUrl: resolvedCover,
-      galleryUrls: const [],
+      galleryUrls: mergedGallery,
       rating: 0.0,
       reviewCount: 0,
       isActive: false,
+      ownerName: cleanApplicant.isNotEmpty
+          ? cleanApplicant
+          : (ownerUser?.fullName ?? ''),
+      ownerPhone: ownerUser?.phone ?? '',
+      ownerEmail: ownerUser?.email ?? '',
       subscriptionPlan: credit.packagePlan,
       isCooperation: credit.packagePlan.isCooperation,
       paymentCode: credit.paymentCode,
       paymentAmount: credit.amount,
       paidAt: credit.paidAt,
+      applicantFullName: cleanApplicant.isNotEmpty
+          ? cleanApplicant
+          : (ownerUser?.fullName ?? ''),
+      cccdFrontUrl: cleanCccdFront,
+      cccdBackUrl: cleanCccdBack,
+      storefrontImageUrl: cleanStorefront,
+      priceListImageUrl: cleanPriceList,
+      businessLicenseUrl: cleanLicense,
     );
     db.shops.add(newShop);
 
@@ -1294,9 +1335,13 @@ class ShopRepositoryImpl implements ShopRepository {
   }
 
   @override
-  Future<Result<void>> deleteShopByAdmin(String shopId) async {
+  Future<Result<void>> deleteShopByAdmin(
+    String shopId, {
+    String? reason,
+  }) async {
+    final cleanReason = reason?.trim() ?? '';
     try {
-      await remote.deleteShopByAdmin(shopId);
+      await remote.deleteShopByAdmin(shopId, reason: cleanReason);
       db.shops.removeWhere((s) => s.id == shopId);
       return Result.success(null);
     } on DioException catch (e) {
@@ -1310,10 +1355,14 @@ class ShopRepositoryImpl implements ShopRepository {
     final sIdx = db.shops.indexWhere((s) => s.id == shopId);
     if (sIdx != -1) {
       final removed = db.shops.removeAt(sIdx);
+      _paidCreditByUserId.remove(removed.ownerId);
       final uIdx = db.users.indexWhere((u) => u.id == removed.ownerId);
       if (uIdx != -1 && db.users[uIdx].role == UserRole.manager) {
         db.users[uIdx] = db.users[uIdx].copyWith(role: UserRole.user);
       }
+      final rejectBody = cleanReason.isNotEmpty
+          ? 'Yêu cầu đăng ký mở quán "${removed.name}" chưa được Admin phê duyệt.\nLý do từ chối: "$cleanReason"'
+          : 'Yêu cầu đăng ký mở quán "${removed.name}" chưa được Admin phê duyệt.';
       db.notifications.insert(
         0,
         AppNotificationEntity(
@@ -1324,12 +1373,76 @@ class ShopRepositoryImpl implements ShopRepository {
               : 'Yêu cầu mở quán "${removed.name}" đã bị từ chối',
           body: removed.isActive
               ? 'Admin hệ thống đã gỡ quán "${removed.name}".'
-              : 'Yêu cầu đăng ký mở quán "${removed.name}" chưa được Admin phê duyệt.',
+              : rejectBody,
           type: NotificationType.shopApproval,
+          payload: {
+            'shopId': removed.id,
+            'approved': false,
+            if (cleanReason.isNotEmpty) 'rejectionReason': cleanReason,
+          },
           createdAt: DateTime.now(),
         ),
       );
     }
     return Result.success(null);
+  }
+
+  @override
+  Future<Result<ShopReportEntity>> createShopReport({
+    required String shopId,
+    required String reporterId,
+    required String reason,
+  }) async {
+    final cleanReason = reason.trim();
+    if (cleanReason.isEmpty) {
+      return Result.failure(
+        const ValidationFailure('Vui lòng nhập nội dung báo cáo'),
+      );
+    }
+    try {
+      final created = await remote.createShopReport(
+        shopId: shopId,
+        reason: cleanReason,
+      );
+      _offlineShopReports.insert(0, created);
+      return Result.success(created);
+    } on DioException catch (e) {
+      if (e.response != null) {
+        return Result.failure(
+          ValidationFailure(_extractDioError(e, 'Không thể gửi báo cáo quán')),
+        );
+      }
+    } catch (_) {}
+
+    final sIdx = db.shops.indexWhere((s) => s.id == shopId);
+    final shop = sIdx != -1 ? db.shops[sIdx] : null;
+    final uIdx = db.users.indexWhere((u) => u.id == reporterId);
+    final reporter = uIdx != -1 ? db.users[uIdx] : db.currentUser;
+    final created = ShopReportEntity(
+      id: 'rep_${DateTime.now().millisecondsSinceEpoch}',
+      shopId: shopId,
+      shopName: shop?.name ?? 'Quán cắt tóc',
+      shopAddress: shop?.address ?? '',
+      reporterId: reporterId,
+      reporterName: reporter?.fullName ?? 'Người dùng',
+      reporterEmail: reporter?.email ?? '',
+      reporterPhone: reporter?.phone ?? '',
+      reason: cleanReason,
+      createdAt: DateTime.now(),
+    );
+    _offlineShopReports.insert(0, created);
+    return Result.success(created);
+  }
+
+  @override
+  Future<Result<List<ShopReportEntity>>> getAdminShopReports() async {
+    try {
+      final remoteList = await remote.getAdminShopReports();
+      _offlineShopReports
+        ..clear()
+        ..addAll(remoteList);
+      return Result.success(remoteList);
+    } catch (_) {}
+    return Result.success(List.unmodifiable(_offlineShopReports));
   }
 }

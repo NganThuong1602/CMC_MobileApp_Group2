@@ -182,6 +182,146 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
     );
   }
 
+  void _showReportShopDialog() {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final user = context.read<AuthCubit>().state.user;
+    if (user == null) return;
+
+    const presetReasons = <String>[
+      'Thông tin/địa chỉ quán không chính xác',
+      'Giá dịch vụ không đúng bảng giá',
+      'Thái độ phục vụ chưa tốt',
+      'Quán đã đóng cửa/không tồn tại',
+      'Khác',
+    ];
+    String selectedOption = presetReasons.first;
+    final customCtrl = TextEditingController();
+    String? customError;
+    bool submitting = false;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.flag_outlined, color: cs.error, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Báo cáo quán',
+                  style: tt.dialogTitle,
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Quán: ${widget.shop.name}',
+                  style: tt.cardTitle,
+                ),
+                const SizedBox(height: 8),
+                ...presetReasons.map(
+                  (option) => RadioListTile<String>(
+                    value: option,
+                    groupValue: selectedOption,
+                    activeColor: cs.primary,
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: Text(option, style: tt.bodyRegular),
+                    onChanged: (val) {
+                      if (val == null) return;
+                      setModalState(() {
+                        selectedOption = val;
+                        customError = null;
+                      });
+                    },
+                  ),
+                ),
+                if (selectedOption == 'Khác') ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: customCtrl,
+                    maxLines: 3,
+                    autofocus: true,
+                    onChanged: (_) {
+                      if (customError != null) {
+                        setModalState(() => customError = null);
+                      }
+                    },
+                    decoration: InputDecoration(
+                      labelText: 'Nhập nội dung báo cáo *',
+                      hintText: 'Mô tả chi tiết vấn đề bạn gặp phải tại quán...',
+                      errorText: customError,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: submitting ? null : () => Navigator.pop(ctx),
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: cs.error,
+                foregroundColor: cs.onError,
+              ),
+              onPressed: submitting
+                  ? null
+                  : () async {
+                      final finalReason = selectedOption == 'Khác'
+                          ? customCtrl.text.trim()
+                          : selectedOption;
+                      if (finalReason.isEmpty) {
+                        setModalState(() {
+                          customError = 'Vui lòng nhập nội dung báo cáo';
+                        });
+                        return;
+                      }
+                      setModalState(() => submitting = true);
+                      final res = await sl<ShopRepository>().createShopReport(
+                        shopId: widget.shop.id,
+                        reporterId: user.id,
+                        reason: finalReason,
+                      );
+                      if (!ctx.mounted) return;
+                      Navigator.pop(ctx);
+                      if (!mounted) return;
+                      res.fold(
+                        onFailure: (f) =>
+                            ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            backgroundColor: cs.error,
+                            content: Text(f.message),
+                          ),
+                        ),
+                        onSuccess: (_) =>
+                            ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            backgroundColor: cs.primary,
+                            content: const Text(
+                              'Đã gửi báo cáo quán tới Admin hệ thống.',
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+              child: const Text('Gửi báo cáo'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = context.colorScheme;
@@ -238,13 +378,29 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                widget.shop.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: tt.cardTitleLarge,
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      widget.shop.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: tt.cardTitleLarge,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    tooltip: 'Báo cáo quán',
+                                    onPressed: _showReportShopDialog,
+                                    icon: Icon(
+                                      Icons.flag_outlined,
+                                      size: 20,
+                                      color: cs.error,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 2),
                               Text(
                                 widget.shop.address,
                                 maxLines: 1,
@@ -642,10 +798,6 @@ class _ShopDetailBottomSheetState extends State<ShopDetailBottomSheet>
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: tt.bodySmallMuted,
-                            ),
-                            Text(
-                              'Xem trang cá nhân →',
-                              style: tt.badgePrimary,
                             ),
                           ],
                         ),

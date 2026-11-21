@@ -215,23 +215,6 @@ class _BarberHubPageState extends State<BarberHubPage> {
                                 );
                               },
                             ),
-                            const SizedBox(height: 12),
-                            _buildBarberMenuCard(
-                              context: context,
-                              icon: Icons.account_balance_wallet_rounded,
-                              iconBg: appColors.warningContainer,
-                              iconColor: appColors.warning,
-                              title: 'Thu nhập',
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => _BarberIncomeScreen(
-                                      barber: _barber!,
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
                           ],
                         ),
             ),
@@ -390,7 +373,7 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
                           SnackBar(
                             backgroundColor: cs.primary,
                             content: const Text(
-                              'Đã xác nhận thanh toán! Đơn chuyển sang COMPLETED & cộng 10% hoa hồng.',
+                              'Đã xác nhận thanh toán! Đơn đã chuyển sang Hoàn thành.',
                             ),
                           ),
                         );
@@ -411,7 +394,7 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  '✅ Đơn đã Hoàn thành & được ghi nhận doanh thu + 10% hoa hồng.',
+                  '✅ Đơn đã Hoàn thành.',
                   style: tt.bodySmallPrimary,
                 ),
               ),
@@ -555,134 +538,6 @@ class _BarberScheduleScreenState extends State<_BarberScheduleScreen> {
                 ),
               ),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BarberIncomeScreen extends StatefulWidget {
-  final BarberEntity barber;
-  const _BarberIncomeScreen({required this.barber});
-
-  @override
-  State<_BarberIncomeScreen> createState() => _BarberIncomeScreenState();
-}
-
-class _BarberIncomeScreenState extends State<_BarberIncomeScreen> {
-  BarberIncomeSummary? _income;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final res =
-        await sl<BarberRepository>().getBarberIncomeSummary(widget.barber.id);
-    if (mounted) {
-      setState(() => _income = res.data);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = context.colorScheme;
-    final tt = context.appTextStyles;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Thu nhập của tôi')),
-      body: _income == null
-          ? const Center(
-              child: CircularProgressIndicator(),
-            )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: cs.primary,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Tổng thu nhập tạm tính trong tháng',
-                        style: tt.bodySmallOnPrimary,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        AppFormatters.formatVnd(_income!.totalIncome),
-                        style: tt.heroPriceOnPrimary,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _income!.expectedPaydayText,
-                        style: tt.bodySmallOnPrimary,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                _metricTile(
-                  context,
-                  'Lương cứng cố định',
-                  AppFormatters.formatVnd(_income!.baseSalary),
-                ),
-                _metricTile(
-                  context,
-                  'Số khách đã Hoàn thành (COMPLETED)',
-                  '${_income!.completedCustomerCount} khách',
-                ),
-                _metricTile(
-                  context,
-                  'Doanh thu dịch vụ đã hoàn thành',
-                  AppFormatters.formatVnd(_income!.completedServiceRevenue),
-                ),
-                _metricTile(
-                  context,
-                  'Hoa hồng nhận được (10%)',
-                  AppFormatters.formatVnd(_income!.commissionAmount),
-                  highlight: true,
-                ),
-              ],
-            ),
-    );
-  }
-
-  Widget _metricTile(
-    BuildContext context,
-    String label,
-    String value, {
-    bool highlight = false,
-  }) {
-    final cs = context.colorScheme;
-    final tt = context.appTextStyles;
-    final appColors = context.appColors;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: appColors.cardShadow,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: tt.bodyMuted,
-            ),
-          ),
-          Text(
-            value,
-            style: highlight ? tt.pricePrimary : tt.cardTitle,
-          ),
         ],
       ),
     );

@@ -88,6 +88,24 @@ export class ShopEntity {
   @Column({ name: 'renewal_notified_at', type: 'timestamptz', nullable: true })
   renewalNotifiedAt?: Date | null;
 
+  @Column({ name: 'applicant_full_name', type: 'varchar', length: 180, nullable: true })
+  applicantFullName?: string;
+
+  @Column({ name: 'cccd_front_url', type: 'text', nullable: true })
+  cccdFrontUrl?: string;
+
+  @Column({ name: 'cccd_back_url', type: 'text', nullable: true })
+  cccdBackUrl?: string;
+
+  @Column({ name: 'storefront_image_url', type: 'text', nullable: true })
+  storefrontImageUrl?: string;
+
+  @Column({ name: 'price_list_image_url', type: 'text', nullable: true })
+  priceListImageUrl?: string;
+
+  @Column({ name: 'business_license_url', type: 'text', nullable: true })
+  businessLicenseUrl?: string;
+
   @OneToMany(() => BarberEntity, (barber) => barber.shop)
   barbers?: BarberEntity[];
 

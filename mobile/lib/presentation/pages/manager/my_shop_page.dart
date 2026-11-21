@@ -2,11 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/di/injection_container.dart';
-import '../../../core/enums/app_enums.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../domain/entities/barber_entity.dart';
-import '../../../domain/entities/finance_entities.dart';
 import '../../../domain/entities/service_entity.dart';
 import '../../../domain/entities/shop_entity.dart';
 import '../../../domain/entities/social_entities.dart';
@@ -17,7 +15,6 @@ import '../../blocs/auth/auth_cubit.dart';
 import '../../blocs/shop_discovery/shop_discovery_cubit.dart';
 import '../../widgets/barbersmart_header.dart';
 import '../../widgets/image_picker_widgets.dart';
-import '../../widgets/sepay_qr_dialog.dart';
 
 /// Màn hình Quản lý quán (Role MANAGER):
 /// - Ảnh cover bo góc có gradient đáy, hiển thị Tên quán + Giờ mở cửa + SĐT đè lên ảnh.
@@ -29,6 +26,7 @@ import '../../widgets/sepay_qr_dialog.dart';
 ///   5. `Doanh thu và lương` (Chỉ cộng doanh thu & 10% hoa hồng từ lịch COMPLETED)
 class MyShopPage extends StatefulWidget {
   final bool openCustomerConsult;
+  final bool openManageServices;
   final String? initialChatRoomId;
   final String? initialCustomerHint;
   final String? navigationToken;
@@ -36,6 +34,7 @@ class MyShopPage extends StatefulWidget {
   const MyShopPage({
     super.key,
     this.openCustomerConsult = false,
+    this.openManageServices = false,
     this.initialChatRoomId,
     this.initialCustomerHint,
     this.navigationToken,
@@ -46,9 +45,12 @@ class MyShopPage extends StatefulWidget {
 }
 
 class _MyShopPageState extends State<MyShopPage> {
+  static final Set<String> _autoOpenedEmptyServiceShopIds = <String>{};
+
   ShopEntity? _shop;
   bool _loading = true;
   String? _lastHandledConsultToken;
+  String? _lastHandledServicesToken;
 
   @override
   void initState() {
@@ -72,6 +74,15 @@ class _MyShopPageState extends State<MyShopPage> {
           );
         }
       });
+    } else if (widget.openManageServices &&
+        _shop != null &&
+        widget.navigationToken != _lastHandledServicesToken) {
+      _lastHandledServicesToken = widget.navigationToken;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _shop != null) {
+          _openManageServicesScreen(_shop!);
+        }
+      });
     }
   }
 
@@ -80,8 +91,9 @@ class _MyShopPageState extends State<MyShopPage> {
     if (user == null) return;
     final res = await sl<ShopRepository>().getShopByOwnerId(user.id);
     if (mounted) {
+      final loadedShop = res.data;
       setState(() {
-        _shop = res.data;
+        _shop = loadedShop;
         _loading = false;
       });
       if (widget.openCustomerConsult &&
@@ -97,6 +109,31 @@ class _MyShopPageState extends State<MyShopPage> {
             );
           }
         });
+      } else if (widget.openManageServices &&
+          _shop != null &&
+          widget.navigationToken != _lastHandledServicesToken) {
+        _lastHandledServicesToken = widget.navigationToken;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _shop != null) {
+            _openManageServicesScreen(_shop!);
+          }
+        });
+      } else if (loadedShop != null &&
+          loadedShop.isActive &&
+          !_autoOpenedEmptyServiceShopIds.contains(loadedShop.id)) {
+        final srvRes =
+            await sl<ShopRepository>().getShopServices(loadedShop.id);
+        final services = srvRes.data ?? const <ServiceEntity>[];
+        if (mounted &&
+            services.isEmpty &&
+            !_autoOpenedEmptyServiceShopIds.contains(loadedShop.id)) {
+          _autoOpenedEmptyServiceShopIds.add(loadedShop.id);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _shop != null) {
+              _openManageServicesScreen(_shop!);
+            }
+          });
+        }
       }
     }
   }
@@ -166,10 +203,10 @@ class _MyShopPageState extends State<MyShopPage> {
     );
   }
 
-  void _openRevenueAndPayrollScreen(ShopEntity shop) {
+  void _openShopReviewsScreen(ShopEntity shop) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _ShopRevenuePayrollScreen(shop: shop),
+        builder: (_) => _ManagerShopReviewsScreen(shop: shop),
       ),
     );
   }
@@ -321,7 +358,7 @@ class _MyShopPageState extends State<MyShopPage> {
                                     const SizedBox(width: 10),
                                     Expanded(
                                       child: Text(
-                                        'Gói quán sắp hết hạn vào ${AppFormatters.formatDateDdMmYyyy(_shop!.subscriptionExpiresAt!)}. Vui lòng vào "Quản lý thông tin" để gia hạn trước khi quán bị tự động gỡ!',
+                                        'Gói quán sắp hết hạn vào ${AppFormatters.formatDateDdMmYyyy(_shop!.subscriptionExpiresAt!)}. Vui lòng gia hạn trước hạn để tránh quán bị tự động gỡ!',
                                         style: tt.bodySmallStrong,
                                       ),
                                     ),
@@ -360,10 +397,9 @@ class _MyShopPageState extends State<MyShopPage> {
                             const SizedBox(height: 12),
                             _buildManagerMenuCard(
                               context: context,
-                              icon: Icons.payments_outlined,
-                              title: 'Doanh thu và lương',
-                              onTap: () =>
-                                  _openRevenueAndPayrollScreen(_shop!),
+                              icon: Icons.star_outline_rounded,
+                              title: 'Xem đánh giá',
+                              onTap: () => _openShopReviewsScreen(_shop!),
                             ),
                           ],
                         ),
@@ -495,39 +531,6 @@ class _ManageShopInfoScreenState extends State<_ManageShopInfoScreen> {
         _closeError == null;
   }
 
-  Future<void> _renewPackage(ShopPackagePlan plan) async {
-    final cs = context.colorScheme;
-    final user = context.read<AuthCubit>().state.user;
-    if (user == null) return;
-    final res = await sl<ShopRepository>().createRenewShopPayment(
-      userId: user.id,
-      shopId: widget.shop.id,
-      packagePlan: plan,
-    );
-    if (!mounted) return;
-    res.fold(
-      onFailure: (f) => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(f.message), backgroundColor: cs.error),
-      ),
-      onSuccess: (tx) async {
-        final paid = await SepayQrDialog.show(
-          context,
-          title: 'Gia hạn ${plan.label} (SePay)',
-          transaction: tx,
-        );
-        if (paid && mounted) {
-          widget.onUpdated();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: cs.primary,
-              content: Text('Đã gia hạn ${plan.label} thành công!'),
-            ),
-          );
-        }
-      },
-    );
-  }
-
   Widget _buildPackageStatusAndRenewSection() {
     final cs = context.colorScheme;
     final ac = context.appColors;
@@ -604,7 +607,7 @@ class _ManageShopInfoScreenState extends State<_ManageShopInfoScreen> {
               Text(
                 shop.isCooperation
                     ? 'Quán đang được ưu tiên Nổi bật ở đầu Trang chủ & tự động áp dụng Mã giảm giá từ Admin.'
-                    : 'Gói tiêu chuẩn. Có thể gia hạn lên Gói Hợp tác để được đẩy lên Nổi bật.',
+                    : 'Gói tiêu chuẩn đang hoạt động trên hệ thống BarberSmart.',
                 style: tt.bodySmallMuted,
               ),
               const SizedBox(height: 8),
@@ -641,71 +644,6 @@ class _ManageShopInfoScreenState extends State<_ManageShopInfoScreen> {
             ],
           ),
         ),
-        const SizedBox(height: 16),
-        Text('Gia hạn gói quán qua SePay', style: tt.sectionTitle),
-        const SizedBox(height: 8),
-        ...ShopPackagePlan.values.map((plan) {
-          final isCurrent = shop.subscriptionPlan == plan;
-          return Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: cs.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: plan.isCooperation ? cs.primary : cs.outlineVariant,
-                width: plan.isCooperation ? 1.5 : 1,
-              ),
-              boxShadow: ac.cardShadow,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(plan.label, style: tt.cardTitle),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${AppFormatters.formatVnd(plan.price)} • ${plan.durationDays} ngày',
-                            style: tt.pricePrimary,
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (plan.isCooperation)
-                      Container(
-                        margin: const EdgeInsets.only(right: 6),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: cs.primaryContainer,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          isCurrent ? 'Đang dùng' : 'Nổi bật',
-                          style: tt.badgePrimary,
-                        ),
-                      ),
-                    ElevatedButton(
-                      onPressed: () => _renewPackage(plan),
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(86, 36),
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                      ),
-                      child: const Text('Gia hạn'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(plan.benefitDescription, style: tt.bodySmallMuted),
-              ],
-            ),
-          );
-        }),
       ],
     );
   }
@@ -1120,11 +1058,9 @@ class _ManageBarbersScreen extends StatefulWidget {
 
 class _ManageBarbersScreenState extends State<_ManageBarbersScreen> {
   final _inviteIdentifierCtrl = TextEditingController();
-  final _salaryCtrl = TextEditingController(text: '6500000');
   List<BarberEntity> _barbers = [];
 
   String? _inviteError;
-  String? _salaryError;
 
   @override
   void initState() {
@@ -1135,7 +1071,6 @@ class _ManageBarbersScreenState extends State<_ManageBarbersScreen> {
   @override
   void dispose() {
     _inviteIdentifierCtrl.dispose();
-    _salaryCtrl.dispose();
     super.dispose();
   }
 
@@ -1148,7 +1083,6 @@ class _ManageBarbersScreenState extends State<_ManageBarbersScreen> {
 
   Future<void> _inviteBarber() async {
     final identifier = _inviteIdentifierCtrl.text.trim();
-    final parsedSalary = int.tryParse(_salaryCtrl.text.trim());
 
     String? inviteErr;
     if (identifier.isEmpty) {
@@ -1159,12 +1093,9 @@ class _ManageBarbersScreenState extends State<_ManageBarbersScreen> {
 
     setState(() {
       _inviteError = inviteErr;
-      _salaryError = (parsedSalary == null || parsedSalary <= 0)
-          ? 'Lương cứng đề xuất phải là số nguyên lớn hơn 0'
-          : null;
     });
 
-    if (_inviteError != null || _salaryError != null) return;
+    if (_inviteError != null) return;
 
     final cs = context.colorScheme;
     final manager = context.read<AuthCubit>().state.user;
@@ -1173,7 +1104,7 @@ class _ManageBarbersScreenState extends State<_ManageBarbersScreen> {
       managerId: manager.id,
       shopId: widget.shop.id,
       emailOrPhone: identifier,
-      baseSalary: parsedSalary!,
+      baseSalary: 0,
     );
     if (!mounted) return;
     res.fold(
@@ -1189,57 +1120,6 @@ class _ManageBarbersScreenState extends State<_ManageBarbersScreen> {
           ),
         );
       },
-    );
-  }
-
-  void _editSalary(BarberEntity barber) {
-    final ctrl = TextEditingController(text: barber.baseSalary.toString());
-    String? salaryError;
-
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Text('Lương cứng: ${barber.fullName}'),
-          content: TextField(
-            controller: ctrl,
-            keyboardType: TextInputType.number,
-            onChanged: (_) {
-              if (salaryError != null) {
-                setModalState(() => salaryError = null);
-              }
-            },
-            decoration: InputDecoration(
-              labelText: 'Lương cứng (VNĐ/tháng) *',
-              errorText: salaryError,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Hủy'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final parsed = int.tryParse(ctrl.text.trim());
-                if (parsed == null || parsed < 0) {
-                  setModalState(() {
-                    salaryError = 'Vui lòng nhập mức lương cứng hợp lệ (>= 0)';
-                  });
-                  return;
-                }
-                await sl<BarberRepository>().updateBarberBaseSalary(
-                  barberId: barber.id,
-                  baseSalary: parsed,
-                );
-                if (ctx.mounted) Navigator.pop(ctx);
-                _loadBarbers();
-              },
-              child: const Text('Cập nhật'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -1315,11 +1195,6 @@ class _ManageBarbersScreenState extends State<_ManageBarbersScreen> {
                   'Mời nhân sự làm Barber (Theo Email hoặc SĐT)',
                   style: tt.cardTitle,
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  'Gợi ý thử nghiệm: nhập `khachmoi@barbersmart.vn` (hợp lệ) hoặc `barber2_1@barbersmart.vn` (báo lỗi do đã thuộc quán khác).',
-                  style: tt.bodySmallMuted,
-                ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _inviteIdentifierCtrl,
@@ -1332,21 +1207,6 @@ class _ManageBarbersScreenState extends State<_ManageBarbersScreen> {
                     hintText: 'Nhập Email hoặc Số điện thoại',
                     prefixIcon: const Icon(Icons.person_search_outlined),
                     errorText: _inviteError,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _salaryCtrl,
-                  keyboardType: TextInputType.number,
-                  onChanged: (_) {
-                    if (_salaryError != null) {
-                      setState(() => _salaryError = null);
-                    }
-                  },
-                  decoration: InputDecoration(
-                    labelText: 'Lương cứng đề xuất (VNĐ)',
-                    prefixIcon: const Icon(Icons.payments_outlined),
-                    errorText: _salaryError,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -1395,20 +1255,15 @@ class _ManageBarbersScreenState extends State<_ManageBarbersScreen> {
                           b.fullName,
                           style: tt.bodyStrong,
                         ),
-                        Text(
-                          'Lương cứng: ${AppFormatters.formatVnd(b.baseSalary)} + 10% hoa hồng',
-                          style: tt.bodySmallMuted,
-                        ),
+                        if (b.email.isNotEmpty || b.phone.isNotEmpty)
+                          Text(
+                            b.email.isNotEmpty && b.phone.isNotEmpty
+                                ? '${b.email} • ${b.phone}'
+                                : (b.email.isNotEmpty ? b.email : b.phone),
+                            style: tt.bodySmallMuted,
+                          ),
                       ],
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'Chỉnh lương cứng',
-                    icon: Icon(
-                      Icons.edit_outlined,
-                      color: cs.primary,
-                    ),
-                    onPressed: () => _editSalary(b),
                   ),
                   IconButton(
                     tooltip: 'Xoá Barber khỏi quán',
@@ -1575,30 +1430,36 @@ class _ManagerChatListScreenState extends State<_ManagerChatListScreen> {
   }
 }
 
-class _ShopRevenuePayrollScreen extends StatefulWidget {
+/// Màn hình Xem đánh giá của quán dành cho Chủ quán (Role MANAGER):
+/// Hiển thị toàn bộ đánh giá của người dùng cho quán (Tên người đánh giá, Số sao và Nội dung đánh giá).
+class _ManagerShopReviewsScreen extends StatefulWidget {
   final ShopEntity shop;
-  const _ShopRevenuePayrollScreen({required this.shop});
+
+  const _ManagerShopReviewsScreen({required this.shop});
 
   @override
-  State<_ShopRevenuePayrollScreen> createState() =>
-      _ShopRevenuePayrollScreenState();
+  State<_ManagerShopReviewsScreen> createState() =>
+      _ManagerShopReviewsScreenState();
 }
 
-class _ShopRevenuePayrollScreenState extends State<_ShopRevenuePayrollScreen> {
-  ShopRevenueSummary? _summary;
+class _ManagerShopReviewsScreenState extends State<_ManagerShopReviewsScreen> {
+  List<ReviewEntity> _reviews = [];
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadReviews();
   }
 
-  Future<void> _load() async {
-    final res =
-        await sl<ShopRepository>().getShopRevenueAndPayroll(widget.shop.id);
-    if (mounted) {
-      setState(() => _summary = res.data);
-    }
+  Future<void> _loadReviews() async {
+    setState(() => _loading = true);
+    final res = await sl<SocialRepository>().getShopReviews(widget.shop.id);
+    if (!mounted) return;
+    setState(() {
+      _reviews = res.data ?? [];
+      _loading = false;
+    });
   }
 
   @override
@@ -1606,89 +1467,111 @@ class _ShopRevenuePayrollScreenState extends State<_ShopRevenuePayrollScreen> {
     final cs = context.colorScheme;
     final tt = context.appTextStyles;
     final appColors = context.appColors;
+    final avgRating = _reviews.isEmpty
+        ? 0.0
+        : _reviews.fold<int>(0, (sum, r) => sum + r.rating) / _reviews.length;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Doanh thu & Bảng lương')),
-      body: _summary == null
-          ? const Center(
-              child: CircularProgressIndicator(),
-            )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: cs.primary,
-                    borderRadius: BorderRadius.circular(18),
+      appBar: AppBar(
+        title: Text('Đánh giá của quán (${_reviews.length})'),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _reviews.isEmpty
+              ? Center(
+                  child: Text(
+                    'Quán của bạn hiện chưa có đánh giá nào từ khách hàng.',
+                    style: tt.bodyMuted,
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                )
+              : RefreshIndicator(
+                  onRefresh: _loadReviews,
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
                     children: [
-                      Text(
-                        'Tổng doanh thu thực thu (Chỉ tính lịch COMPLETED)',
-                        style: tt.bodySmallOnPrimary,
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: cs.primaryContainer,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.star_rounded,
+                              size: 36,
+                              color: appColors.starRating,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Điểm trung bình: ${avgRating.toStringAsFixed(1)} / 5.0',
+                                    style: tt.cardTitleLarge,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Tổng cộng ${_reviews.length} lượt đánh giá từ khách hàng',
+                                    style: tt.bodySmallPrimary,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        AppFormatters.formatVnd(_summary!.totalShopRevenue),
-                        style: tt.heroPriceOnPrimary,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Số đơn hoàn thành: ${_summary!.completedBookingCount} đơn • Tổng quỹ lương & hoa hồng: ${AppFormatters.formatVnd(_summary!.totalBarberPayout)}',
-                        style: tt.bodySmallOnPrimary,
+                      const SizedBox(height: 14),
+                      ..._reviews.map(
+                        (r) => Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: cs.surface,
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: appColors.cardShadow,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      r.userName,
+                                      style: tt.bodyStrong,
+                                    ),
+                                  ),
+                                  Row(
+                                    children: List.generate(
+                                      r.rating,
+                                      (_) => Icon(
+                                        Icons.star_rounded,
+                                        size: 16,
+                                        color: appColors.starRating,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                AppFormatters.formatRelativeTime(r.createdAt),
+                                style: tt.captionMuted,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                r.comment,
+                                style: tt.bodyRegular,
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  'Bảng lương chi tiết từng Barber (Lương cứng + 10% Hoa hồng)',
-                  style: tt.sectionTitle,
-                ),
-                const SizedBox(height: 10),
-                ..._summary!.barberPayrolls.map(
-                  (p) => Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: cs.surface,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: appColors.cardShadow,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                p.barberName,
-                                style: tt.cardTitle,
-                              ),
-                            ),
-                            Text(
-                              AppFormatters.formatVnd(p.totalPayout),
-                              style: tt.pricePrimary,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Khách hoàn thành: ${p.completedCustomerCount} • Doanh thu tạo ra: ${AppFormatters.formatVnd(p.generatedRevenue)}',
-                          style: tt.bodySmallMuted,
-                        ),
-                        Text(
-                          'Lương cứng: ${AppFormatters.formatVnd(p.baseSalary)} + Hoa hồng (10%): ${AppFormatters.formatVnd(p.commissionAmount)}',
-                          style: tt.bodyRegular,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
     );
   }
 }

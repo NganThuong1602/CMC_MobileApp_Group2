@@ -36,6 +36,7 @@ class AdminHubPage extends StatefulWidget {
 class _AdminHubPageState extends State<AdminHubPage> {
   List<ShopEntity> _pendingShops = [];
   List<ShopEntity> _activeShops = [];
+  List<ShopReportEntity> _reports = [];
   bool _loading = true;
   String? _lastToken;
 
@@ -67,10 +68,12 @@ class _AdminHubPageState extends State<AdminHubPage> {
     setState(() => _loading = true);
     final pendingRes = await sl<ShopRepository>().getAdminPendingShops();
     final activeRes = await sl<ShopRepository>().getAdminActiveShops();
+    final reportsRes = await sl<ShopRepository>().getAdminShopReports();
     if (!mounted) return;
     setState(() {
       _pendingShops = pendingRes.data ?? [];
       _activeShops = activeRes.data ?? [];
+      _reports = reportsRes.data ?? [];
       _loading = false;
     });
   }
@@ -109,6 +112,16 @@ class _AdminHubPageState extends State<AdminHubPage> {
             _loadAdminData();
             context.read<ShopDiscoveryCubit>().loadAll();
           },
+        ),
+      ),
+    );
+  }
+
+  void _openReportsScreen() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _AdminShopReportsScreen(
+          onChanged: _loadAdminData,
         ),
       ),
     );
@@ -275,6 +288,17 @@ class _AdminHubPageState extends State<AdminHubPage> {
                                 'Tổng cộng ${_activeShops.length} quán đang hoạt động • Kiểm tra & xoá quán',
                             onTap: _openActiveShopsScreen,
                           ),
+                          const SizedBox(height: 12),
+                          _buildAdminMenuCard(
+                            context: context,
+                            icon: Icons.flag_outlined,
+                            title: 'Báo cáo',
+                            subtitle: _reports.isEmpty
+                                ? 'Hiện chưa có báo cáo nào từ người dùng'
+                                : 'Có ${_reports.length} báo cáo từ người dùng về các quán',
+                            badgeCount: _reports.length,
+                            onTap: _openReportsScreen,
+                          ),
                         ],
                       ),
                     ),
@@ -420,32 +444,76 @@ class _AdminPendingShopsScreenState extends State<_AdminPendingShopsScreen> {
 
   Future<void> _reject(ShopEntity shop) async {
     final cs = context.colorScheme;
-    final confirmed = await showDialog<bool>(
+    final tt = context.appTextStyles;
+    final reasonCtrl = TextEditingController();
+    String? reasonError;
+
+    final rejectionReason = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Từ chối yêu cầu mở quán?'),
-        content: Text(
-          'Bạn có chắc chắn muốn từ chối yêu cầu đăng ký quán "${shop.name}" không?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Hủy'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AlertDialog(
+          title: const Text('Từ chối yêu cầu mở quán'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Nhập ghi chú lý do không phê duyệt quán "${shop.name}". Ghi chú này sẽ được gửi trực tiếp về thông báo cho người đăng ký:',
+                style: tt.bodyRegular,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reasonCtrl,
+                maxLines: 3,
+                autofocus: true,
+                onChanged: (_) {
+                  if (reasonError != null) {
+                    setModalState(() => reasonError = null);
+                  }
+                },
+                decoration: InputDecoration(
+                  labelText: 'Lý do từ chối duyệt quán *',
+                  hintText:
+                      'VD: Ảnh CCCD hoặc Giấy phép kinh doanh bị mờ, vui lòng chụp rõ nét hơn...',
+                  errorText: reasonError,
+                ),
+              ),
+            ],
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: cs.error,
-              foregroundColor: cs.onError,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Hủy'),
             ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Từ chối'),
-          ),
-        ],
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: cs.error,
+                foregroundColor: cs.onError,
+              ),
+              onPressed: () {
+                final clean = reasonCtrl.text.trim();
+                if (clean.isEmpty) {
+                  setModalState(() {
+                    reasonError =
+                        'Vui lòng nhập lý do từ chối để thông báo cho người đăng ký';
+                  });
+                  return;
+                }
+                Navigator.pop(ctx, clean);
+              },
+              child: const Text('Gửi lý do & Từ chối'),
+            ),
+          ],
+        ),
       ),
     );
-    if (confirmed != true || !mounted) return;
+    reasonCtrl.dispose();
+    if (rejectionReason == null || rejectionReason.isEmpty || !mounted) return;
 
-    final res = await sl<ShopRepository>().deleteShopByAdmin(shop.id);
+    final res = await sl<ShopRepository>().deleteShopByAdmin(
+      shop.id,
+      reason: rejectionReason,
+    );
     if (!mounted) return;
     res.fold(
       onFailure: (f) => ScaffoldMessenger.of(context).showSnackBar(
@@ -457,7 +525,9 @@ class _AdminPendingShopsScreenState extends State<_AdminPendingShopsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: cs.primary,
-            content: Text('Đã từ chối yêu cầu mở quán "${shop.name}".'),
+            content: Text(
+              'Đã từ chối mở quán "${shop.name}" và gửi lý do về thông báo cho người đăng ký.',
+            ),
           ),
         );
       },
@@ -576,11 +646,13 @@ class _AdminPendingShopsScreenState extends State<_AdminPendingShopsScreen> {
                                           style: tt.bodySmallPrimary,
                                         ),
                                       ],
-                                      if (shop.ownerName.isNotEmpty) ...[
+                                      if (shop.applicantFullName.isNotEmpty ||
+                                          shop.ownerName.isNotEmpty) ...[
                                         const SizedBox(height: 3),
                                         Text(
-                                          'Người đăng ký: ${shop.ownerName} (${shop.ownerEmail})',
-                                          style: tt.captionMuted,
+                                          'Họ tên đăng ký: ${shop.applicantFullName.isNotEmpty ? shop.applicantFullName : shop.ownerName}'
+                                          '${shop.ownerEmail.isNotEmpty ? ' (${shop.ownerEmail})' : ''}',
+                                          style: tt.captionStrong,
                                         ),
                                       ],
                                     ],
@@ -595,22 +667,7 @@ class _AdminPendingShopsScreenState extends State<_AdminPendingShopsScreen> {
                                 style: tt.bodyRegular,
                               ),
                             ],
-                            const SizedBox(height: 10),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton.icon(
-                                onPressed: () =>
-                                    _showPendingShopDetailSheet(shop),
-                                icon: const Icon(
-                                  Icons.visibility_outlined,
-                                  size: 18,
-                                ),
-                                label: const Text(
-                                  'Xem đầy đủ hồ sơ & vị trí bản đồ',
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 12),
                             Row(
                               children: [
                                 Expanded(
@@ -806,6 +863,17 @@ class _AdminPendingShopsScreenState extends State<_AdminPendingShopsScreen> {
                         cs: cs,
                       ),
                       _buildDetailItem(
+                        icon: Icons.badge_outlined,
+                        label: 'Họ và tên người đăng ký',
+                        value: shop.applicantFullName.trim().isNotEmpty
+                            ? shop.applicantFullName
+                            : (shop.ownerName.trim().isNotEmpty
+                                ? shop.ownerName
+                                : 'Chưa cập nhật'),
+                        tt: tt,
+                        cs: cs,
+                      ),
+                      _buildDetailItem(
                         icon: Icons.person_outline_rounded,
                         label: 'Tài khoản đăng ký',
                         value: [
@@ -817,6 +885,13 @@ class _AdminPendingShopsScreenState extends State<_AdminPendingShopsScreen> {
                         cs: cs,
                       ),
                       const SizedBox(height: 12),
+                      Text(
+                        'Hồ sơ giấy tờ & Hình ảnh đính kèm (Bấm vào ảnh để xem rõ)',
+                        style: tt.sectionTitle,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildVerificationImagesGrid(sheetCtx, shop, cs, tt),
+                      const SizedBox(height: 16),
                       Text(
                         'Vị trí đã ghim trên bản đồ OpenStreetMap',
                         style: tt.sectionTitle,
@@ -929,6 +1004,221 @@ class _AdminPendingShopsScreenState extends State<_AdminPendingShopsScreen> {
       ),
     );
   }
+
+  Widget _buildVerificationImagesGrid(
+    BuildContext context,
+    ShopEntity shop,
+    ColorScheme cs,
+    AppTextStyles tt,
+  ) {
+    final items = <({String label, String url})>[
+      if (shop.coverImageUrl.trim().isNotEmpty)
+        (label: 'Ảnh bìa quán', url: shop.coverImageUrl.trim()),
+      if (shop.storefrontImageUrl.trim().isNotEmpty)
+        (label: 'Ảnh mặt tiền quán', url: shop.storefrontImageUrl.trim()),
+      if (shop.priceListImageUrl.trim().isNotEmpty)
+        (label: 'Ảnh bảng giá dịch vụ', url: shop.priceListImageUrl.trim()),
+      if (shop.cccdFrontUrl.trim().isNotEmpty)
+        (label: 'CCCD mặt trước', url: shop.cccdFrontUrl.trim()),
+      if (shop.cccdBackUrl.trim().isNotEmpty)
+        (label: 'CCCD mặt sau', url: shop.cccdBackUrl.trim()),
+      if (shop.businessLicenseUrl.trim().isNotEmpty)
+        (label: 'Giấy phép kinh doanh', url: shop.businessLicenseUrl.trim()),
+    ];
+
+    if (items.isEmpty) {
+      return Text(
+        'Người đăng ký chưa đính kèm ảnh giấy tờ.',
+        style: tt.bodySmallMuted,
+      );
+    }
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: items.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: 1.18,
+      ),
+      itemBuilder: (ctx, i) {
+        final doc = items[i];
+        return InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _showZoomableImageDialog(
+            context,
+            title: doc.label,
+            imageUrl: doc.url,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: cs.outlineVariant),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.network(
+                        doc.url,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: cs.surfaceContainerLow,
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.broken_image_outlined,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        right: 6,
+                        top: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: cs.inverseSurface.withValues(alpha: 0.72),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.zoom_in_rounded,
+                                size: 13,
+                                color: cs.onInverseSurface,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                'Xem rõ',
+                                style: tt.captionOnPrimary,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
+                  child: Text(
+                    doc.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: tt.captionStrong,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showZoomableImageDialog(
+    BuildContext context, {
+    required String title,
+    required String imageUrl,
+  }) {
+    _showAdminTransparentImagePopup(
+      context,
+      title: title,
+      imageUrl: imageUrl,
+    );
+  }
+}
+
+void _showAdminTransparentImagePopup(
+  BuildContext context, {
+  required String title,
+  required String imageUrl,
+}) {
+  final cs = context.colorScheme;
+  final tt = context.appTextStyles;
+  final appColors = context.appColors;
+
+  showDialog<void>(
+    context: context,
+    barrierColor: cs.scrim.withValues(alpha: 0.55),
+    builder: (dialogCtx) => Dialog(
+      backgroundColor: cs.surface.withValues(alpha: 0),
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: cs.surface,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: appColors.cardShadow,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: tt.cardTitle,
+                  ),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: cs.onSurface,
+                  ),
+                  tooltip: 'Đóng',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Flexible(
+            child: Container(
+              decoration: BoxDecoration(
+                color: cs.surface,
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: appColors.cardShadow,
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: InteractiveViewer(
+                minScale: 0.8,
+                maxScale: 4.5,
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'Không thể tải hình ảnh',
+                      style: tt.bodyRegular,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _AdminActiveShopsScreen extends StatefulWidget {
@@ -1032,76 +1322,600 @@ class _AdminActiveShopsScreenState extends State<_AdminActiveShopsScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (ctx, i) {
                     final shop = _shops[i];
-                    return Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: cs.surface,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: appColors.cardShadow,
-                      ),
-                      child: Row(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.network(
-                              shop.coverImageUrl,
-                              width: 64,
-                              height: 64,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Container(
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () => _showActiveShopDetailSheet(shop),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: cs.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: appColors.cardShadow,
+                        ),
+                        child: Row(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.network(
+                                shop.coverImageUrl,
                                 width: 64,
                                 height: 64,
-                                color: cs.primaryContainer,
-                                child: Icon(
-                                  Icons.storefront_rounded,
-                                  color: cs.primary,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Container(
+                                  width: 64,
+                                  height: 64,
+                                  color: cs.primaryContainer,
+                                  child: Icon(
+                                    Icons.storefront_rounded,
+                                    color: cs.primary,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  shop.name,
-                                  style: tt.cardTitle,
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  shop.address,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: tt.bodySmallMuted,
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  shop.hasRating
-                                      ? 'SĐT: ${shop.phone} • ★ ${shop.rating.toStringAsFixed(1)}'
-                                      : 'SĐT: ${shop.phone}',
-                                  style: tt.bodySmallPrimary,
-                                ),
-                                if (shop.ownerName.isNotEmpty)
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
                                   Text(
-                                    'Chủ quán: ${shop.ownerName}',
-                                    style: tt.captionMuted,
+                                    shop.name,
+                                    style: tt.cardTitle,
                                   ),
-                              ],
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    shop.address,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: tt.bodySmallMuted,
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    shop.hasRating
+                                        ? 'SĐT: ${shop.phone} • ★ ${shop.rating.toStringAsFixed(1)}'
+                                        : 'SĐT: ${shop.phone}',
+                                    style: tt.bodySmallPrimary,
+                                  ),
+                                  if (shop.ownerName.isNotEmpty)
+                                    Text(
+                                      'Chủ quán: ${shop.ownerName}',
+                                      style: tt.captionMuted,
+                                    ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Xoá quán khỏi hệ thống',
+                              onPressed: () => _confirmDeleteShop(shop),
+                              icon: Icon(
+                                Icons.delete_outline_rounded,
+                                color: cs.error,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
+
+  void _showActiveShopDetailSheet(ShopEntity shop) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final center = LatLng(shop.latitude, shop.longitude);
+
+    final docItems = <({String label, String url})>[
+      if (shop.coverImageUrl.trim().isNotEmpty)
+        (label: 'Ảnh bìa quán', url: shop.coverImageUrl.trim()),
+      if (shop.storefrontImageUrl.trim().isNotEmpty)
+        (label: 'Ảnh mặt tiền quán', url: shop.storefrontImageUrl.trim()),
+      if (shop.priceListImageUrl.trim().isNotEmpty)
+        (label: 'Ảnh bảng giá dịch vụ', url: shop.priceListImageUrl.trim()),
+      if (shop.cccdFrontUrl.trim().isNotEmpty)
+        (label: 'CCCD mặt trước', url: shop.cccdFrontUrl.trim()),
+      if (shop.cccdBackUrl.trim().isNotEmpty)
+        (label: 'CCCD mặt sau', url: shop.cccdBackUrl.trim()),
+      if (shop.businessLicenseUrl.trim().isNotEmpty)
+        (label: 'Giấy phép kinh doanh', url: shop.businessLicenseUrl.trim()),
+      ...shop.galleryUrls
+          .where(
+            (u) =>
+                u.trim().isNotEmpty &&
+                u.trim() != shop.coverImageUrl.trim() &&
+                u.trim() != shop.storefrontImageUrl.trim() &&
+                u.trim() != shop.priceListImageUrl.trim(),
+          )
+          .map((u) => (label: 'Ảnh không gian quán', url: u.trim())),
+    ];
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.88,
+          minChildSize: 0.55,
+          maxChildSize: 0.95,
+          builder: (_, scrollCtrl) {
+            return Column(
+              children: [
+                const SizedBox(height: 8),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: cs.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Thông tin chi tiết quán',
+                          style: tt.dialogTitle,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(sheetCtx),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView(
+                    controller: scrollCtrl,
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      GestureDetector(
+                        onTap: () => _showAdminTransparentImagePopup(
+                          sheetCtx,
+                          title: 'Ảnh bìa: ${shop.name}',
+                          imageUrl: shop.coverImageUrl,
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Image.network(
+                            shop.coverImageUrl,
+                            height: 180,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              height: 180,
+                              color: cs.primaryContainer,
+                              alignment: Alignment.center,
+                              child: Icon(
+                                Icons.storefront_rounded,
+                                size: 48,
+                                color: cs.primary,
+                              ),
                             ),
                           ),
-                          IconButton(
-                            tooltip: 'Xoá quán khỏi hệ thống',
-                            onPressed: () => _confirmDeleteShop(shop),
-                            icon: Icon(
-                              Icons.delete_outline_rounded,
-                              color: cs.error,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(shop.name, style: tt.pageTitle),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.primaryContainer,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              'Đang hoạt động',
+                              style: tt.badgePrimary,
                             ),
                           ),
                         ],
                       ),
-                    );
-                  },
+                      const SizedBox(height: 12),
+                      _buildActiveShopInfoRow(
+                        icon: Icons.workspace_premium_outlined,
+                        label: 'Gói đăng ký',
+                        value: [
+                          shop.subscriptionPlan?.label ??
+                              (shop.isCooperation
+                                  ? 'Gói Hợp tác'
+                                  : 'Gói Thành viên'),
+                          if (shop.subscriptionExpiresAt != null)
+                            'Hạn đến: ${AppFormatters.formatDateDdMmYyyy(shop.subscriptionExpiresAt!)}',
+                        ].join(' • '),
+                        tt: tt,
+                        cs: cs,
+                      ),
+                      if (shop.paymentAmount > 0 ||
+                          shop.paymentCode.isNotEmpty)
+                        _buildActiveShopInfoRow(
+                          icon: Icons.payments_outlined,
+                          label: 'Thanh toán SePay',
+                          value: [
+                            if (shop.paymentAmount > 0)
+                              AppFormatters.formatVnd(shop.paymentAmount),
+                            if (shop.paymentCode.isNotEmpty)
+                              'Mã GD: ${shop.paymentCode}',
+                            if (shop.paidAt != null)
+                              AppFormatters.formatDateDdMmYyyy(shop.paidAt!),
+                          ].join(' • '),
+                          tt: tt,
+                          cs: cs,
+                        ),
+                      _buildActiveShopInfoRow(
+                        icon: Icons.badge_outlined,
+                        label: 'Họ và tên người đăng ký',
+                        value: shop.applicantFullName.trim().isNotEmpty
+                            ? shop.applicantFullName
+                            : (shop.ownerName.trim().isNotEmpty
+                                ? shop.ownerName
+                                : 'Chủ quán'),
+                        tt: tt,
+                        cs: cs,
+                      ),
+                      _buildActiveShopInfoRow(
+                        icon: Icons.person_outline_rounded,
+                        label: 'Tài khoản chủ quán',
+                        value: [
+                          if (shop.ownerName.isNotEmpty) shop.ownerName,
+                          if (shop.ownerEmail.isNotEmpty) shop.ownerEmail,
+                          if (shop.ownerPhone.isNotEmpty) shop.ownerPhone,
+                        ].join(' • '),
+                        tt: tt,
+                        cs: cs,
+                      ),
+                      _buildActiveShopInfoRow(
+                        icon: Icons.location_on_outlined,
+                        label: 'Địa chỉ chi tiết',
+                        value: shop.address,
+                        tt: tt,
+                        cs: cs,
+                      ),
+                      _buildActiveShopInfoRow(
+                        icon: Icons.phone_outlined,
+                        label: 'Số điện thoại liên hệ',
+                        value: shop.phone,
+                        tt: tt,
+                        cs: cs,
+                      ),
+                      _buildActiveShopInfoRow(
+                        icon: Icons.schedule_rounded,
+                        label: 'Giờ hoạt động',
+                        value: '${shop.openTime} - ${shop.closeTime}',
+                        tt: tt,
+                        cs: cs,
+                      ),
+                      if (shop.hasRating)
+                        _buildActiveShopInfoRow(
+                          icon: Icons.star_outline_rounded,
+                          label: 'Đánh giá khách hàng',
+                          value:
+                              '${shop.rating.toStringAsFixed(1)} ⭐ (${shop.reviewCount} lượt đánh giá)',
+                          tt: tt,
+                          cs: cs,
+                        ),
+                      _buildActiveShopInfoRow(
+                        icon: Icons.description_outlined,
+                        label: 'Mô tả cửa hàng',
+                        value: shop.description.trim().isEmpty
+                            ? 'Chưa cập nhật mô tả'
+                            : shop.description,
+                        tt: tt,
+                        cs: cs,
+                      ),
+                      if (docItems.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          'Hồ sơ giấy tờ & Hình ảnh quán (Bấm vào ảnh để xem rõ)',
+                          style: tt.sectionTitle,
+                        ),
+                        const SizedBox(height: 8),
+                        GridView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: docItems.length,
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 10,
+                            childAspectRatio: 1.18,
+                          ),
+                          itemBuilder: (ctx, idx) {
+                            final doc = docItems[idx];
+                            return InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () => _showAdminTransparentImagePopup(
+                                sheetCtx,
+                                title: doc.label,
+                                imageUrl: doc.url,
+                              ),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: cs.surfaceContainerLowest,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: cs.outlineVariant),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(
+                                      child: Image.network(
+                                        doc.url,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => Container(
+                                          color: cs.surfaceContainerLow,
+                                          alignment: Alignment.center,
+                                          child: Icon(
+                                            Icons.broken_image_outlined,
+                                            color: cs.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 6,
+                                      ),
+                                      child: Text(
+                                        doc.label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: tt.captionStrong,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      Text(
+                        'Vị trí quán trên bản đồ OpenStreetMap',
+                        style: tt.sectionTitle,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Tọa độ: ${shop.latitude.toStringAsFixed(5)}, ${shop.longitude.toStringAsFixed(5)}',
+                        style: tt.captionMuted,
+                      ),
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: SizedBox(
+                          height: 190,
+                          child: FlutterMap(
+                            options: MapOptions(
+                              initialCenter: center,
+                              initialZoom: 15,
+                            ),
+                            children: [
+                              TileLayer(
+                                urlTemplate: AppConstants.osmTileUrl,
+                                userAgentPackageName:
+                                    AppConstants.osmUserAgentPackage,
+                              ),
+                              MarkerLayer(
+                                markers: [
+                                  Marker(
+                                    point: center,
+                                    width: 44,
+                                    height: 44,
+                                    child: Icon(
+                                      Icons.location_on_rounded,
+                                      size: 40,
+                                      color: cs.primary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildActiveShopInfoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    required AppTextStyles tt,
+    required ColorScheme cs,
+  }) {
+    if (value.trim().isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: cs.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: tt.captionMuted),
+                const SizedBox(height: 2),
+                Text(value, style: tt.bodyRegular),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminShopReportsScreen extends StatefulWidget {
+  final VoidCallback onChanged;
+
+  const _AdminShopReportsScreen({required this.onChanged});
+
+  @override
+  State<_AdminShopReportsScreen> createState() =>
+      _AdminShopReportsScreenState();
+}
+
+class _AdminShopReportsScreenState extends State<_AdminShopReportsScreen> {
+  List<ShopReportEntity> _reports = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final res = await sl<ShopRepository>().getAdminShopReports();
+    if (!mounted) return;
+    setState(() {
+      _reports = res.data ?? [];
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final appColors = context.appColors;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Báo cáo quán (${_reports.length})'),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _reports.isEmpty
+              ? Center(
+                  child: Text(
+                    'Hiện chưa có báo cáo nào từ người dùng.',
+                    style: tt.bodyMuted,
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _reports.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (ctx, i) {
+                      final r = _reports[i];
+                      final reporterContact = [
+                        if (r.reporterEmail.trim().isNotEmpty)
+                          r.reporterEmail.trim(),
+                        if (r.reporterPhone.trim().isNotEmpty)
+                          r.reporterPhone.trim(),
+                      ].join(' • ');
+
+                      return Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: cs.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: appColors.cardShadow,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.flag_rounded,
+                                  color: cs.error,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Báo cáo vi phạm',
+                                    style: tt.cardTitle,
+                                  ),
+                                ),
+                                Text(
+                                  AppFormatters.formatRelativeTime(r.createdAt),
+                                  style: tt.captionMuted,
+                                ),
+                              ],
+                            ),
+                            const Divider(height: 20),
+                            Text(
+                              'Người báo cáo',
+                              style: tt.captionMuted,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              reporterContact.isNotEmpty
+                                  ? '${r.reporterName} ($reporterContact)'
+                                  : r.reporterName,
+                              style: tt.bodyStrong,
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              'Quán bị báo cáo',
+                              style: tt.captionMuted,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              r.shopAddress.trim().isNotEmpty
+                                  ? '${r.shopName} • ${r.shopAddress}'
+                                  : r.shopName,
+                              style: tt.bodyStrong,
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              'Nội dung báo cáo',
+                              style: tt.captionMuted,
+                            ),
+                            const SizedBox(height: 4),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: cs.errorContainer.withValues(alpha: 0.45),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                r.reason,
+                                style: tt.bodyRegular,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
     );
   }

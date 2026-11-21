@@ -112,6 +112,12 @@ class ShopModel extends ShopEntity {
     super.paymentCode,
     super.paymentAmount,
     super.paidAt,
+    super.applicantFullName,
+    super.cccdFrontUrl,
+    super.cccdBackUrl,
+    super.storefrontImageUrl,
+    super.priceListImageUrl,
+    super.businessLicenseUrl,
   });
 
   factory ShopModel.fromJson(Map<String, dynamic> json) {
@@ -174,6 +180,16 @@ class ShopModel extends ShopEntity {
       paidAt: json['paidAt'] != null
           ? DateTime.tryParse(json['paidAt'].toString())
           : null,
+      applicantFullName: (json['applicantFullName'] ??
+              json['ownerName'] ??
+              ownerMap?['fullName'] ??
+              '')
+          .toString(),
+      cccdFrontUrl: (json['cccdFrontUrl'] ?? '').toString(),
+      cccdBackUrl: (json['cccdBackUrl'] ?? '').toString(),
+      storefrontImageUrl: (json['storefrontImageUrl'] ?? '').toString(),
+      priceListImageUrl: (json['priceListImageUrl'] ?? '').toString(),
+      businessLicenseUrl: (json['businessLicenseUrl'] ?? '').toString(),
     );
   }
 }
@@ -619,6 +635,38 @@ class DiscountCodeModel extends DiscountCodeEntity {
           DateTime.tryParse((json['endAt'] ?? '').toString()) ??
           DateTime.now(),
       isActive: json['isActive'] as bool? ?? true,
+    );
+  }
+}
+
+class ShopReportModel extends ShopReportEntity {
+  const ShopReportModel({
+    required super.id,
+    required super.shopId,
+    required super.shopName,
+    super.shopAddress,
+    required super.reporterId,
+    required super.reporterName,
+    super.reporterEmail,
+    super.reporterPhone,
+    required super.reason,
+    required super.createdAt,
+  });
+
+  factory ShopReportModel.fromJson(Map<String, dynamic> json) {
+    return ShopReportModel(
+      id: (json['id'] ?? '').toString(),
+      shopId: (json['shopId'] ?? '').toString(),
+      shopName: (json['shopName'] ?? 'Quán cắt tóc').toString(),
+      shopAddress: (json['shopAddress'] ?? '').toString(),
+      reporterId: (json['reporterId'] ?? '').toString(),
+      reporterName: (json['reporterName'] ?? 'Người dùng').toString(),
+      reporterEmail: (json['reporterEmail'] ?? '').toString(),
+      reporterPhone: (json['reporterPhone'] ?? '').toString(),
+      reason: (json['reason'] ?? '').toString(),
+      createdAt:
+          DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
+          DateTime.now(),
     );
   }
 }

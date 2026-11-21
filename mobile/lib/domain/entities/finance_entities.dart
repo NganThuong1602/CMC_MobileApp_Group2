@@ -156,3 +156,43 @@ class RegisterShopCredit extends Equatable {
       [hasCredit, paymentCode, packagePlan, amount, paidAt];
 }
 
+class ShopReportEntity extends Equatable {
+  final String id;
+  final String shopId;
+  final String shopName;
+  final String shopAddress;
+  final String reporterId;
+  final String reporterName;
+  final String reporterEmail;
+  final String reporterPhone;
+  final String reason;
+  final DateTime createdAt;
+
+  const ShopReportEntity({
+    required this.id,
+    required this.shopId,
+    required this.shopName,
+    this.shopAddress = '',
+    required this.reporterId,
+    required this.reporterName,
+    this.reporterEmail = '',
+    this.reporterPhone = '',
+    required this.reason,
+    required this.createdAt,
+  });
+
+  @override
+  List<Object?> get props => [
+        id,
+        shopId,
+        shopName,
+        shopAddress,
+        reporterId,
+        reporterName,
+        reporterEmail,
+        reporterPhone,
+        reason,
+        createdAt,
+      ];
+}
+

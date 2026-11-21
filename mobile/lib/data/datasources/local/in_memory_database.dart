@@ -577,15 +577,6 @@ class InMemoryDatabase {
         createdAt: now.subtract(const Duration(minutes: 45)),
       ),
       AppNotificationEntity(
-        id: 'notif_2',
-        userId: 'u_customer_1',
-        title: 'SePay đã xác nhận thanh toán QR',
-        body: 'Giao dịch 170.000đ cho lịch 09:00 đã tự động hoàn tất.',
-        type: NotificationType.paymentConfirmed,
-        isRead: false,
-        createdAt: now.subtract(const Duration(hours: 3)),
-      ),
-      AppNotificationEntity(
         id: 'notif_3',
         userId: 'u_customer_1',
         title: 'Ưu đãi Thành viên thân thiết',

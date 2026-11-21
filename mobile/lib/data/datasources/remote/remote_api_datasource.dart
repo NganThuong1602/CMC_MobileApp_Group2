@@ -543,8 +543,33 @@ class RemoteApiDataSource {
     return ShopModel.fromJson(Map<String, dynamic>.from(res.data as Map));
   }
 
-  Future<void> deleteShopByAdmin(String shopId) async {
-    await apiClient.dio.delete('/shops/$shopId/admin');
+  Future<void> deleteShopByAdmin(String shopId, {String? reason}) async {
+    final cleanReason = reason?.trim() ?? '';
+    await apiClient.dio.delete(
+      '/shops/$shopId/admin',
+      queryParameters: cleanReason.isNotEmpty ? {'reason': cleanReason} : null,
+      data: cleanReason.isNotEmpty ? {'reason': cleanReason} : null,
+    );
+  }
+
+  Future<ShopReportModel> createShopReport({
+    required String shopId,
+    required String reason,
+  }) async {
+    final res = await apiClient.dio.post(
+      '/shops/$shopId/reports',
+      data: {'reason': reason},
+    );
+    return ShopReportModel.fromJson(Map<String, dynamic>.from(res.data as Map));
+  }
+
+  Future<List<ShopReportModel>> getAdminShopReports() async {
+    final res = await apiClient.dio.get('/shops/admin/reports');
+    final list = res.data as List? ?? const [];
+    return list
+        .whereType<Map>()
+        .map((m) => ShopReportModel.fromJson(Map<String, dynamic>.from(m)))
+        .toList();
   }
 
   Future<void> respondBarberInvitation(

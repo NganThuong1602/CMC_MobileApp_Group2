@@ -106,6 +106,75 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
+  Future<void> _showRejectedShopDialog(AppNotificationEntity notif) async {
+    final cs = context.colorScheme;
+    final tt = context.appTextStyles;
+    final reasonFromMeta =
+        (notif.payload?['rejectionReason'] ?? '').toString().trim();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.cancel_outlined, color: cs.error, size: 24),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Chi tiết từ chối mở quán',
+                style: tt.dialogTitle,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(notif.title, style: tt.cardTitle),
+            const SizedBox(height: 4),
+            Text(
+              'Thời gian: ${AppFormatters.formatRelativeTime(notif.createdAt)}',
+              style: tt.captionMuted,
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: cs.errorContainer,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: cs.error.withValues(alpha: 0.45)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Nội dung & Lý do từ chối từ Admin:',
+                    style: tt.bodySmallDanger,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    reasonFromMeta.isNotEmpty
+                        ? 'Lý do: "$reasonFromMeta"\n\n${notif.body}'
+                        : notif.body,
+                    style: tt.bodyRegular,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Đóng'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = context.colorScheme;
@@ -184,11 +253,34 @@ class _NotificationsPageState extends State<NotificationsPage> {
                             if (mounted) _load();
                             return;
                           }
-                        } else if (n.type == NotificationType.shopApproval &&
-                            currentUser?.role == UserRole.admin) {
-                          final ts = DateTime.now().millisecondsSinceEpoch;
-                          context.go('/?tab=2&ts=$ts');
-                          return;
+                        } else if (n.type == NotificationType.shopApproval) {
+                          if (currentUser?.role == UserRole.admin) {
+                            final ts = DateTime.now().millisecondsSinceEpoch;
+                            context.go('/?tab=2&ts=$ts');
+                            return;
+                          }
+                          final isRejectedNotif =
+                              n.payload?['approved'] == false ||
+                                  titleLower.contains('từ chối');
+                          if (isRejectedNotif) {
+                            if (mounted) _load();
+                            await _showRejectedShopDialog(n);
+                            return;
+                          }
+
+                          await context.read<AuthCubit>().refreshCurrentUser();
+                          if (!context.mounted) return;
+                          final refreshedUser =
+                              context.read<AuthCubit>().state.user;
+                          final isApprovedNotif =
+                              n.payload?['approved'] == true ||
+                                  titleLower.contains('phê duyệt');
+                          if (refreshedUser?.role == UserRole.manager &&
+                              isApprovedNotif) {
+                            final ts = DateTime.now().millisecondsSinceEpoch;
+                            context.go('/?tab=2&ts=$ts');
+                            return;
+                          }
                         }
 
                         _load();
@@ -304,7 +396,6 @@ class _BarberInvitationDetailPageState
     final tt = context.appTextStyles;
     final appColors = context.appColors;
     final n = widget.notification;
-    final baseSalary = (n.payload?['baseSalary'] as num?)?.toInt();
 
     return Scaffold(
       appBar: AppBar(
@@ -369,32 +460,6 @@ class _BarberInvitationDetailPageState
                   n.body,
                   style: tt.bodyRegular,
                 ),
-                if (baseSalary != null && baseSalary > 0) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: cs.primaryContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.payments_outlined,
-                          color: cs.primary,
-                          size: 22,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'Chế độ đãi ngộ: Lương cứng ${AppFormatters.formatVnd(baseSalary)} + 10% hoa hồng trên mỗi đơn cắt hoàn tất.',
-                            style: tt.bodySmallPrimary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
                 const SizedBox(height: 24),
                 if (_responded)
                   Container(

@@ -127,7 +127,11 @@ export class PaymentsService implements OnModuleInit {
       order: { paidAt: 'DESC', createdAt: 'DESC' },
     });
     const unused = paidTxs.find(
-      (t) => !t.shopId && t.metadataJson?.consumed !== true,
+      (t) =>
+        !t.shopId &&
+        t.metadataJson?.consumed !== true &&
+        t.metadataJson?.rejected !== true &&
+        !('shopId' in (t.metadataJson ?? {})),
     );
     if (!unused) {
       return { hasCredit: false };

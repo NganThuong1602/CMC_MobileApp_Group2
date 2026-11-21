@@ -1,9 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/di/injection_container.dart';
+import '../../../core/enums/app_enums.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../domain/entities/finance_entities.dart';
 import '../../../domain/entities/shop_entity.dart';
+import '../../../domain/repositories/shop_repository.dart';
 import '../../blocs/auth/auth_cubit.dart';
 import '../../blocs/shop_discovery/shop_discovery_cubit.dart';
 import '../../widgets/barbersmart_header.dart';
@@ -11,7 +16,7 @@ import '../../widgets/shop_filter_bottom_sheet.dart';
 import '../shop/shop_detail_bottom_sheet.dart';
 
 /// Màn hình Trang chủ chuẩn Pixel-perfect theo Ảnh 3:
-/// - Popup hỏi quyền Vị trí khi mới vào Trang chủ.
+/// - Popup hỏi quyền Vị trí & Popup Banner Sale % (kiểu Shopee) cho role USER khi có mã giảm giá từ Admin.
 /// - Header BARBERSMART + chuông đỏ + avatar tròn xanh + Thanh tìm kiếm & nút Filter.
 /// - Danh sách Card quán lân cận (Ảnh bìa to, Badge sao góc phải trên, Khoảng cách, Giờ mở cửa, Liên hệ).
 class HomePage extends StatefulWidget {
@@ -27,13 +32,28 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  static String? _shownSalePopupUserId;
+  static StreamSubscription<AuthState>? _authResetSub;
+
   final _searchCtrl = TextEditingController();
+  bool _checkingSalePopup = false;
 
   @override
   void initState() {
     super.initState();
+    _ensureAuthResetWatcher();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _promptLocationPermissionIfNeeded();
+      unawaited(_checkAndShowAdminSaleBannerPopup());
+      unawaited(_promptLocationPermissionIfNeeded());
+    });
+  }
+
+  void _ensureAuthResetWatcher() {
+    if (_authResetSub != null || !sl.isRegistered<AuthCubit>()) return;
+    _authResetSub = sl<AuthCubit>().stream.listen((authState) {
+      if (!authState.isAuthenticated) {
+        _shownSalePopupUserId = null;
+      }
     });
   }
 
@@ -51,6 +71,205 @@ class _HomePageState extends State<HomePage> {
     await cubit.requestRealDeviceLocation(userId: userId);
   }
 
+  Future<void> _checkAndShowAdminSaleBannerPopup() async {
+    if (!mounted || _checkingSalePopup) return;
+    final user = context.read<AuthCubit>().state.user;
+    if (user == null || user.role != UserRole.user) return;
+    if (_shownSalePopupUserId == user.id) return;
+
+    _checkingSalePopup = true;
+    try {
+      int bestPercent = 0;
+      String bestTitle = '';
+
+      if (sl.isRegistered<ShopRepository>()) {
+        final res = await sl<ShopRepository>().getDiscountCodes();
+        final list = res.data ?? const <DiscountCodeEntity>[];
+        final now = DateTime.now();
+        final activeToday = list.where((d) {
+          if (!d.isActive) return false;
+          if (d.isActiveAt(now)) return true;
+          final sameDayStart = d.startAt.year == now.year &&
+              d.startAt.month == now.month &&
+              d.startAt.day == now.day;
+          return sameDayStart && !d.endAt.isBefore(now);
+        }).toList()
+          ..sort((a, b) => b.discountPercent.compareTo(a.discountPercent));
+
+        if (activeToday.isNotEmpty) {
+          bestPercent = activeToday.first.discountPercent;
+          bestTitle = activeToday.first.name;
+        }
+      }
+
+      if (!mounted) return;
+      if (bestPercent <= 0) {
+        final discoveryState = context.read<ShopDiscoveryCubit>().state;
+        final allShops = [
+          ...discoveryState.allNearbyShops,
+          ...discoveryState.nearbyShops,
+          ...discoveryState.highlightedShops,
+        ];
+        for (final s in allShops) {
+          if (s.activeDiscountPercent > bestPercent) {
+            bestPercent = s.activeDiscountPercent;
+            bestTitle = s.activeDiscountName;
+          }
+        }
+      }
+
+      if (bestPercent <= 0 || !mounted) return;
+      _shownSalePopupUserId = user.id;
+
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (dialogCtx) {
+          final cs = dialogCtx.colorScheme;
+          final tt = dialogCtx.appTextStyles;
+          final appColors = dialogCtx.appColors;
+
+          void goToHighlightedShops() {
+            Navigator.of(dialogCtx).pop();
+            if (!mounted) return;
+            final cubit = context.read<ShopDiscoveryCubit>();
+            if (!cubit.state.onlyHighlightedFilter) {
+              cubit.toggleHighlightedFilter(userId: user.id);
+            }
+          }
+
+          return Dialog(
+            backgroundColor: cs.surface.withValues(alpha: 0),
+            elevation: 0,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GestureDetector(
+                  onTap: goToHighlightedShops,
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: cs.surface,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: cs.error, width: 2.5),
+                      boxShadow: appColors.cardShadow,
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                cs.error,
+                                cs.primary,
+                              ],
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: cs.surface,
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.local_fire_department_rounded,
+                                      size: 16,
+                                      color: cs.error,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'SIÊU SALE HÔM NAY',
+                                      style: tt.badgeDanger,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'SALE $bestPercent%',
+                                textAlign: TextAlign.center,
+                                style: tt.heroPriceOnPrimary,
+                              ),
+                              if (bestTitle.trim().isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  bestTitle.trim(),
+                                  textAlign: TextAlign.center,
+                                  style: tt.bodyOnPrimary,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Column(
+                            children: [
+                              Text(
+                                'Giảm ngay $bestPercent% toàn bộ dịch vụ cắt tóc tại các Quán Nổi Bật!',
+                                textAlign: TextAlign.center,
+                                style: tt.bodyStrong,
+                              ),
+                              const SizedBox(height: 14),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: goToHighlightedShops,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: cs.error,
+                                    foregroundColor: cs.onError,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.workspace_premium_rounded,
+                                    size: 18,
+                                  ),
+                                  label: const Text(
+                                    'Săn sale tại Quán Nổi Bật ngay',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                IconButton.filled(
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  style: IconButton.styleFrom(
+                    backgroundColor: cs.inverseSurface,
+                    foregroundColor: cs.onInverseSurface,
+                  ),
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Đóng',
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    } finally {
+      _checkingSalePopup = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = context.colorScheme;
@@ -59,11 +278,16 @@ class _HomePageState extends State<HomePage> {
 
     return BlocConsumer<ShopDiscoveryCubit, ShopDiscoveryState>(
       listenWhen: (prev, curr) =>
-          prev.filterResetRevision != curr.filterResetRevision,
+          prev.filterResetRevision != curr.filterResetRevision ||
+          (prev.allNearbyShops.length != curr.allNearbyShops.length &&
+              curr.allNearbyShops.isNotEmpty) ||
+          (prev.nearbyShops.length != curr.nearbyShops.length &&
+              curr.nearbyShops.isNotEmpty),
       listener: (context, state) {
-        if (_searchCtrl.text.isNotEmpty) {
+        if (_searchCtrl.text.isNotEmpty && !state.hasActiveFilter && state.searchQuery.isEmpty) {
           setState(() => _searchCtrl.clear());
         }
+        unawaited(_checkAndShowAdminSaleBannerPopup());
       },
       builder: (context, state) {
         return Column(

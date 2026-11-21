@@ -2,7 +2,6 @@ import 'package:dio/dio.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/enums/app_enums.dart';
 import '../../core/error/failures.dart';
-import '../../core/utils/formatters.dart';
 import '../../core/utils/result.dart';
 import '../../domain/entities/barber_entity.dart';
 import '../../domain/entities/booking_entity.dart';
@@ -174,7 +173,7 @@ class BarberRepositoryImpl implements BarberRepository {
         userId: targetUser.id,
         title: 'Lời mời trở thành Barber tại $shopName',
         body:
-            'Mức lương cứng đề xuất: ${AppFormatters.formatVnd(baseSalary > 0 ? baseSalary : 6000000)} + 10% hoa hồng dịch vụ. Nhấn Đồng ý để nhận việc!',
+            'Quản lý quán "$shopName" mời bạn gia nhập đội ngũ Barber của quán. Nhấn Đồng ý để nhận việc!',
         type: NotificationType.barberInvitation,
         targetShopId: shopId,
         createdAt: DateTime.now(),

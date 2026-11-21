@@ -37,6 +37,9 @@ export class ReviewEntity {
   @Column({ type: 'text' })
   comment!: string;
 
+  @Column({ name: 'is_seen_by_manager', type: 'boolean', default: false })
+  isSeenByManager!: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }
@@ -124,6 +127,35 @@ export class NotificationEntity {
 
   @Column({ type: 'jsonb', nullable: true })
   metadata?: Record<string, any>;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
+@Entity('shop_reports')
+export class ShopReportEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'shop_id' })
+  shopId!: string;
+
+  @ManyToOne(() => ShopEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'shop_id' })
+  shop!: ShopEntity;
+
+  @Column({ name: 'reporter_id' })
+  reporterId!: string;
+
+  @ManyToOne(() => UserEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'reporter_id' })
+  reporter!: UserEntity;
+
+  @Column({ type: 'text' })
+  reason!: string;
+
+  @Column({ name: 'is_seen_by_admin', type: 'boolean', default: false })
+  isSeenByAdmin!: boolean;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

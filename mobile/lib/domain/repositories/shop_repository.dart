@@ -44,6 +44,12 @@ abstract class ShopRepository {
     required double latitude,
     required double longitude,
     String? coverImageUrl,
+    String? applicantFullName,
+    String? cccdFrontUrl,
+    String? cccdBackUrl,
+    String? storefrontImageUrl,
+    String? priceListImageUrl,
+    String? businessLicenseUrl,
   });
 
   Future<Result<PaymentTransactionEntity>> createRenewShopPayment({
@@ -109,7 +115,7 @@ abstract class ShopRepository {
 
   Future<Result<ShopEntity>> approveShopByAdmin(String shopId);
 
-  Future<Result<void>> deleteShopByAdmin(String shopId);
+  Future<Result<void>> deleteShopByAdmin(String shopId, {String? reason});
 
   Future<Result<List<DiscountCodeEntity>>> getDiscountCodes();
 
@@ -122,5 +128,13 @@ abstract class ShopRepository {
   });
 
   Future<Result<void>> deleteDiscountCode(String id);
+
+  Future<Result<ShopReportEntity>> createShopReport({
+    required String shopId,
+    required String reporterId,
+    required String reason,
+  });
+
+  Future<Result<List<ShopReportEntity>>> getAdminShopReports();
 }
 

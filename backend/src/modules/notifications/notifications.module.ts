@@ -1,6 +1,8 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Global,
   Injectable,
@@ -14,13 +16,20 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository, TypeOrmModule } from '@nestjs/typeorm';
 import * as admin from 'firebase-admin';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { CurrentUser, JwtAuthGuard } from '../../common/auth.guards';
 import {
   FcmTokenEntity,
   NotificationEntity,
   NotificationType,
 } from '../../database/entities';
+
+const INVALID_FCM_ERROR_CODES = new Set<string>([
+  'messaging/invalid-registration-token',
+  'messaging/registration-token-not-registered',
+  'messaging/invalid-argument',
+  'messaging/unregistered',
+]);
 
 @Injectable()
 export class NotificationsService {
@@ -40,30 +49,91 @@ export class NotificationsService {
       .get<string>('FIREBASE_PRIVATE_KEY')
       ?.replace(/\\n/g, '\n');
 
-    if (projectId && clientEmail && privateKey && !projectId.includes('your_')) {
-      if (admin.apps.length === 0) {
-        admin.initializeApp({
-          credential: admin.credential.cert({
-            projectId,
-            clientEmail,
-            privateKey,
-          }),
-        });
+    if (
+      projectId &&
+      clientEmail &&
+      privateKey &&
+      !projectId.includes('your_') &&
+      !privateKey.includes('YOUR_PRIVATE_KEY')
+    ) {
+      try {
+        if (admin.apps.length === 0) {
+          admin.initializeApp({
+            credential: admin.credential.cert({
+              projectId,
+              clientEmail,
+              privateKey,
+            }),
+          });
+        }
+        this.fcmReady = true;
+      } catch (err) {
+        this.logger.warn(
+          `Firebase Admin init skipped (${err instanceof Error ? err.message : 'invalid config'})`,
+        );
       }
-      this.fcmReady = true;
     }
   }
 
   async registerFcmToken(userId: string, token: string, platform = 'android') {
-    const existing = await this.tokenRepo.findOne({ where: { token } });
+    const cleanToken = (token ?? '').trim();
+    if (!cleanToken) {
+      throw new BadRequestException('FCM token không hợp lệ');
+    }
+    const cleanPlatform = (platform ?? 'android').trim().toLowerCase() || 'android';
+
+    const existing = await this.tokenRepo.findOne({
+      where: { token: cleanToken },
+    });
     if (existing) {
       existing.userId = userId;
-      existing.platform = platform;
-      return this.tokenRepo.save(existing);
+      existing.platform = cleanPlatform;
+      const saved = await this.tokenRepo.save(existing);
+      this.logger.debug(
+        `Updated FCM token ownership for user=${userId} platform=${cleanPlatform}`,
+      );
+      return { id: saved.id, userId: saved.userId, platform: saved.platform };
     }
-    return this.tokenRepo.save(
-      this.tokenRepo.create({ userId, token, platform }),
+    const saved = await this.tokenRepo.save(
+      this.tokenRepo.create({
+        userId,
+        token: cleanToken,
+        platform: cleanPlatform,
+      }),
     );
+    this.logger.debug(
+      `Registered new FCM token for user=${userId} platform=${cleanPlatform}`,
+    );
+    return { id: saved.id, userId: saved.userId, platform: saved.platform };
+  }
+
+  async unregisterFcmToken(userId: string, token?: string) {
+    const cleanToken = (token ?? '').trim();
+    if (cleanToken) {
+      await this.tokenRepo.delete({ userId, token: cleanToken });
+    } else {
+      await this.tokenRepo.delete({ userId });
+    }
+    this.logger.debug(`Removed FCM token(s) on logout for user=${userId}`);
+    return { success: true };
+  }
+
+  private buildStringDataPayload(
+    notificationId: string,
+    type: NotificationType,
+    metadata?: Record<string, any>,
+  ): Record<string, string> {
+    const data: Record<string, string> = {
+      notificationId: String(notificationId),
+      type: String(type),
+    };
+    if (!metadata) return data;
+    for (const key of ['shopId', 'roomId', 'bookingId', 'barberId', 'approved']) {
+      if (metadata[key] !== undefined && metadata[key] !== null) {
+        data[key] = String(metadata[key]);
+      }
+    }
+    return data;
   }
 
   async createAndPush(params: {
@@ -73,28 +143,89 @@ export class NotificationsService {
     type?: NotificationType;
     metadata?: Record<string, any>;
   }) {
+    const resolvedType = params.type ?? NotificationType.SYSTEM;
     const saved = await this.notiRepo.save(
       this.notiRepo.create({
         recipientId: params.recipientId,
         title: params.title,
         body: params.body,
-        type: params.type ?? NotificationType.SYSTEM,
+        type: resolvedType,
         metadata: params.metadata,
       }),
     );
 
     if (this.fcmReady) {
-      const tokens = await this.tokenRepo.find({
+      const tokenEntities = await this.tokenRepo.find({
         where: { userId: params.recipientId },
       });
-      if (tokens.length > 0) {
+      // Khử trùng lặp token trên cùng user (nếu có)
+      const uniqueTokenEntities: FcmTokenEntity[] = [];
+      const seenTokens = new Set<string>();
+      for (const item of tokenEntities) {
+        const t = (item.token ?? '').trim();
+        if (!t || seenTokens.has(t)) continue;
+        seenTokens.add(t);
+        uniqueTokenEntities.push(item);
+      }
+
+      if (uniqueTokenEntities.length > 0) {
         try {
-          await admin.messaging().sendEachForMulticast({
-            tokens: tokens.map((t) => t.token),
-            notification: { title: params.title, body: params.body },
+          const dataPayload = this.buildStringDataPayload(
+            saved.id,
+            resolvedType,
+            params.metadata,
+          );
+          const batchResponse = await admin.messaging().sendEachForMulticast({
+            tokens: uniqueTokenEntities.map((t) => t.token),
+            notification: {
+              title: params.title,
+              body: params.body,
+            },
+            data: dataPayload,
+            android: {
+              priority: 'high',
+              notification: {
+                channelId: 'barbersmart_notifications',
+                icon: 'ic_launcher',
+                sound: 'default',
+                defaultSound: true,
+              },
+            },
+            webpush: {
+              notification: {
+                title: params.title,
+                body: params.body,
+                icon: '/icons/Icon-192.png',
+              },
+              fcmOptions: {
+                link: '/#/notifications',
+              },
+            },
           });
+
+          const invalidTokenIds: string[] = [];
+          batchResponse.responses.forEach((resp, idx) => {
+            if (!resp.success) {
+              const code = resp.error?.code ?? 'unknown';
+              if (INVALID_FCM_ERROR_CODES.has(code)) {
+                invalidTokenIds.push(uniqueTokenEntities[idx].id);
+              }
+            }
+          });
+
+          if (invalidTokenIds.length > 0) {
+            await this.tokenRepo.delete({ id: In(invalidTokenIds) });
+          }
+
+          if (batchResponse.failureCount > 0) {
+            this.logger.debug(
+              `FCM multicast recipient=${params.recipientId} type=${resolvedType}: ${batchResponse.successCount} sent, ${batchResponse.failureCount} failed (${invalidTokenIds.length} expired/invalid tokens pruned)`,
+            );
+          }
         } catch (err) {
-          this.logger.warn(`FCM push error: ${err}`);
+          this.logger.warn(
+            `FCM push error for recipient=${params.recipientId}: ${err instanceof Error ? err.message : 'send failed'}`,
+          );
         }
       }
     }
@@ -157,6 +288,14 @@ export class NotificationsController {
     @Body() body: { token: string; platform?: string },
   ) {
     return this.service.registerFcmToken(user.id, body.token, body.platform);
+  }
+
+  @Delete('fcm-token')
+  removeToken(
+    @CurrentUser() user: { id: string },
+    @Body() body?: { token?: string },
+  ) {
+    return this.service.unregisterFcmToken(user.id, body?.token);
   }
 }
 

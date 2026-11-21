@@ -27,8 +27,8 @@ export class TransactionEntity {
   @Column({ name: 'user_id' })
   userId!: string;
 
-  @Column({ name: 'shop_id', nullable: true })
-  shopId?: string;
+  @Column({ name: 'shop_id', type: 'varchar', nullable: true })
+  shopId?: string | null;
 
   @Column({ name: 'booking_id', nullable: true })
   bookingId?: string;

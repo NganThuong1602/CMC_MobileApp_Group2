@@ -32,6 +32,12 @@ class ShopEntity extends Equatable {
   final String paymentCode;
   final int paymentAmount;
   final DateTime? paidAt;
+  final String applicantFullName;
+  final String cccdFrontUrl;
+  final String cccdBackUrl;
+  final String storefrontImageUrl;
+  final String priceListImageUrl;
+  final String businessLicenseUrl;
 
   const ShopEntity({
     required this.id,
@@ -64,6 +70,12 @@ class ShopEntity extends Equatable {
     this.paymentCode = '',
     this.paymentAmount = 0,
     this.paidAt,
+    this.applicantFullName = '',
+    this.cccdFrontUrl = '',
+    this.cccdBackUrl = '',
+    this.storefrontImageUrl = '',
+    this.priceListImageUrl = '',
+    this.businessLicenseUrl = '',
   });
 
   bool get hasRating => reviewCount > 0 && rating > 0;
@@ -112,6 +124,12 @@ class ShopEntity extends Equatable {
     String? paymentCode,
     int? paymentAmount,
     DateTime? paidAt,
+    String? applicantFullName,
+    String? cccdFrontUrl,
+    String? cccdBackUrl,
+    String? storefrontImageUrl,
+    String? priceListImageUrl,
+    String? businessLicenseUrl,
   }) {
     return ShopEntity(
       id: id ?? this.id,
@@ -146,6 +164,12 @@ class ShopEntity extends Equatable {
       paymentCode: paymentCode ?? this.paymentCode,
       paymentAmount: paymentAmount ?? this.paymentAmount,
       paidAt: paidAt ?? this.paidAt,
+      applicantFullName: applicantFullName ?? this.applicantFullName,
+      cccdFrontUrl: cccdFrontUrl ?? this.cccdFrontUrl,
+      cccdBackUrl: cccdBackUrl ?? this.cccdBackUrl,
+      storefrontImageUrl: storefrontImageUrl ?? this.storefrontImageUrl,
+      priceListImageUrl: priceListImageUrl ?? this.priceListImageUrl,
+      businessLicenseUrl: businessLicenseUrl ?? this.businessLicenseUrl,
     );
   }
 
@@ -181,5 +205,11 @@ class ShopEntity extends Equatable {
         paymentCode,
         paymentAmount,
         paidAt,
+        applicantFullName,
+        cccdFrontUrl,
+        cccdBackUrl,
+        storefrontImageUrl,
+        priceListImageUrl,
+        businessLicenseUrl,
       ];
 }
